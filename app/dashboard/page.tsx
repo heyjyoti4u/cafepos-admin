@@ -152,6 +152,18 @@ export default function AdminDashboard() {
   // ── Realtime ──────────────────────────────────────────────────────────────
   useEffect(() => {
     audioRef.current = new Audio('/ding.mp3')
+    audioRef.current.loop = true   // keep ringing until accepted/declined
+
+    // Browsers block audio.play() until the user has interacted with the
+    // page at least once. This "unlocks" audio with a silent play+pause
+    // on first click anywhere, so the ringtone can play later without a
+    // fresh gesture when a real order comes in.
+    const unlockAudio = () => {
+      audioRef.current?.play().then(() => audioRef.current?.pause()).catch(() => {})
+      window.removeEventListener('click', unlockAudio)
+    }
+    window.addEventListener('click', unlockAudio)
+
     fetchOrders()
 
     const channel = supabase
@@ -160,7 +172,6 @@ export default function AdminDashboard() {
         const o = payload.new as any
         setNewOrderId(o.id)
         setTimeout(() => setNewOrderId(null), 5000)
-        audioRef.current?.play().catch(() => {})
         setTimeout(() => fetchOrders(), 800)
 
         // Fetch order items for popup
@@ -177,6 +188,8 @@ export default function AdminDashboard() {
     return () => {
       supabase.removeChannel(channel)
       Object.values(declineTimers.current).forEach(clearTimeout)
+      audioRef.current?.pause()
+      window.removeEventListener('click', unlockAudio)
     }
   }, [])
 
@@ -373,6 +386,22 @@ export default function AdminDashboard() {
   const deliveredOrders = orders.filter(o => o.status === 'delivered')
   const kitchenActive   = orders.filter(o => ['pending', 'preparing'].includes(o.status))
   const unpaidOrders    = orders.filter(o => o.status === 'delivered' && o.payment_status !== 'paid')
+
+  // ── Ringtone: keep ringing on loop while ANY order is waiting in
+  // "New Requests" (not yet accepted or declined). Stops automatically
+  // the moment the last pending request is accepted/declined.
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio) return
+
+    if (newRequests.length > 0) {
+      audio.currentTime = 0
+      audio.play().catch(() => {})
+    } else {
+      audio.pause()
+      audio.currentTime = 0
+    }
+  }, [newRequests.length])
 
   // ── Merge unpaid orders by table_number into single bill groups ───────────
   // Same table, multiple unpaid delivered orders (customer ordered twice
