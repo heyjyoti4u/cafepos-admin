@@ -153,16 +153,9 @@ export default function AdminDashboard() {
   useEffect(() => {
     audioRef.current = new Audio('/ding.mp3')
     audioRef.current.loop = true   // keep ringing until accepted/declined
-
-    // Browsers block audio.play() until the user has interacted with the
-    // page at least once. This "unlocks" audio with a silent play+pause
-    // on first click anywhere, so the ringtone can play later without a
-    // fresh gesture when a real order comes in.
-    const unlockAudio = () => {
-      audioRef.current?.play().then(() => audioRef.current?.pause()).catch(() => {})
-      window.removeEventListener('click', unlockAudio)
-    }
-    window.addEventListener('click', unlockAudio)
+    audioRef.current.volume = 1.0
+    // Preload so the very first play() call doesn't have to wait on a network fetch
+    audioRef.current.load()
 
     fetchOrders()
 
@@ -189,7 +182,6 @@ export default function AdminDashboard() {
       supabase.removeChannel(channel)
       Object.values(declineTimers.current).forEach(clearTimeout)
       audioRef.current?.pause()
-      window.removeEventListener('click', unlockAudio)
     }
   }, [])
 
@@ -390,17 +382,45 @@ export default function AdminDashboard() {
   // ── Ringtone: keep ringing on loop while ANY order is waiting in
   // "New Requests" (not yet accepted or declined). Stops automatically
   // the moment the last pending request is accepted/declined.
+  //
+  // IMPORTANT: browsers block audio.play() until the user interacts with
+  // the page. If play() fails (e.g. dashboard just loaded and there's
+  // already a pending order), we retry on the NEXT click/keypress —
+  // not just the very first one — so the ringtone never gets "stuck"
+  // silently failed.
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
 
-    if (newRequests.length > 0) {
-      audio.currentTime = 0
-      audio.play().catch(() => {})
-    } else {
+    if (newRequests.length === 0) {
       audio.pause()
       audio.currentTime = 0
+      return
     }
+
+    let cancelled = false
+
+    const tryPlay = () => {
+      if (cancelled) return
+      audio.currentTime = 0
+      audio.play().catch(() => {
+        // Autoplay blocked — wait for ANY user interaction, then retry once.
+        const retry = () => {
+          if (cancelled) return
+          audio.play().catch(() => {})
+          window.removeEventListener('click', retry)
+          window.removeEventListener('keydown', retry)
+          window.removeEventListener('touchstart', retry)
+        }
+        window.addEventListener('click', retry)
+        window.addEventListener('keydown', retry)
+        window.addEventListener('touchstart', retry)
+      })
+    }
+
+    tryPlay()
+
+    return () => { cancelled = true }
   }, [newRequests.length])
 
   // ── Merge unpaid orders by table_number into single bill groups ───────────
