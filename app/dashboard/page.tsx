@@ -571,10 +571,10 @@ export default function AdminDashboard() {
       await write(bytes(cmd.normal, cmd.bold_off))
       await write(enc.encode('--------------------------------\n'))
       await write(bytes(cmd.left))
-      await write(enc.encode(\`Table: \${group.tableNumber}\n\`))
-      await write(enc.encode(\`Customer: \${group.customerNames.join(' & ')}\n\`))
-      await write(enc.encode(\`Date: \${now}\n\`))
-      if (group.orderIds.length > 1) await write(enc.encode(\`Orders: \${group.orderIds.length} merged\n\`))
+      await write(enc.encode(`Table: ${group.tableNumber}\n`))
+      await write(enc.encode(`Customer: ${group.customerNames.join(' & ')}\n`))
+      await write(enc.encode(`Date: ${now}\n`))
+      if (group.orderIds.length > 1) await write(enc.encode(`Orders: ${group.orderIds.length} merged\n`))
       await write(enc.encode('--------------------------------\n'))
       await write(bytes(cmd.bold_on))
       await write(padLine('ITEM', 'AMT'))
@@ -582,18 +582,18 @@ export default function AdminDashboard() {
       await write(enc.encode('--------------------------------\n'))
 
       for (const item of group.items) {
-        const name = \`\${item.quantity}x \${item.item_name}\`.slice(0, 22)
-        const amt  = \`Rs.\${item.item_price * item.quantity}\`
+        const name = `${item.quantity}x ${item.item_name}`.slice(0, 22)
+        const amt  = `Rs.${item.item_price * item.quantity}`
         await write(padLine(name, amt))
         await write(bytes(cmd.lf))
         if (item.add_ons?.length) {
-          await write(enc.encode(\`  + \${item.add_ons.map((a:any)=>a.name).join(', ')}\n\`))
+          await write(enc.encode(`  + ${item.add_ons.map((a:any)=>a.name).join(', ')}\n`))
         }
       }
 
       await write(enc.encode('================================\n'))
       await write(bytes(cmd.bold_on))
-      await write(padLine('TOTAL', \`Rs.\${group.totalAmount}\`))
+      await write(padLine('TOTAL', `Rs.${group.totalAmount}`))
       await write(bytes(cmd.lf, cmd.bold_off))
       await write(enc.encode('================================\n'))
       await write(bytes(cmd.center))
@@ -612,12 +612,12 @@ export default function AdminDashboard() {
   // ── Browser print fallback ────────────────────────────────────────────────
   const printBillBrowser = (group: any) => {
     const now = new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
-    const itemsHtml = group.items.map((item: any) => \`
+    const itemsHtml = group.items.map((item: any) => `
       <tr>
-        <td>\${item.quantity}x \${item.item_name}\${item.add_ons?.length ? '<br><small style="color:#666">+ ' + item.add_ons.map((a:any)=>a.name).join(', ') + '</small>' : ''}</td>
-        <td style="text-align:right">&#8377;\${item.item_price * item.quantity}</td>
-      </tr>\`).join('')
-    const html = \`<!DOCTYPE html><html><head><title>Bill - Table \${group.tableNumber}</title>
+        <td>${item.quantity}x ${item.item_name}${item.add_ons?.length ? '<br><small style="color:#666">+ ' + item.add_ons.map((a:any)=>a.name).join(', ') + '</small>' : ''}</td>
+        <td style="text-align:right">&#8377;${item.item_price * item.quantity}</td>
+      </tr>`).join('')
+    const html = `<!DOCTYPE html><html><head><title>Bill - Table ${group.tableNumber}</title>
     <style>
       @page { size: 80mm auto; margin: 4mm; }
       body { font-family: monospace; font-size: 12px; width: 72mm; }
@@ -629,20 +629,20 @@ export default function AdminDashboard() {
       .total td { font-weight:bold; font-size:14px; border-top:2px solid #000; padding-top:6px; }
     </style></head><body>
     <h2>Cafe Cookies</h2>
-    <div class="center" style="font-size:11px">\${now}</div>
+    <div class="center" style="font-size:11px">${now}</div>
     <div class="divider"></div>
-    <div>Table: <b>\${group.tableNumber}</b></div>
-    <div>Customer: <b>\${group.customerNames.join(' & ')}</b></div>
-    \${group.orderIds.length > 1 ? '<div>' + group.orderIds.length + ' orders merged</div>' : ''}
+    <div>Table: <b>${group.tableNumber}</b></div>
+    <div>Customer: <b>${group.customerNames.join(' & ')}</b></div>
+    ${group.orderIds.length > 1 ? '<div>' + group.orderIds.length + ' orders merged</div>' : ''}
     <div class="divider"></div>
     <table>
       <thead><tr><th style="text-align:left">Item</th><th style="text-align:right">Amt</th></tr></thead>
-      <tbody>\${itemsHtml}</tbody>
-      <tfoot class="total"><tr><td>TOTAL</td><td style="text-align:right">&#8377;\${group.totalAmount}</td></tr></tfoot>
+      <tbody>${itemsHtml}</tbody>
+      <tfoot class="total"><tr><td>TOTAL</td><td style="text-align:right">&#8377;${group.totalAmount}</td></tr></tfoot>
     </table>
     <div class="divider"></div>
     <div class="center" style="margin-top:8px">Thank you for visiting!<br>Cafe Cookies</div>
-    </body></html>\`
+    </body></html>`
     const w = window.open('', '_blank', 'width=400,height=600')
     if (!w) return
     w.document.write(html)
