@@ -33,6 +33,11 @@ export default function AdminDashboard() {
   const popupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [authChecked, setAuthChecked]         = useState(false)
   const [hiddenDeclined, setHiddenDeclined]   = useState<Set<string>>(new Set())
+
+  // ── Printer State ─────────────────────────────────────────────────────────
+  const [printConfirm, setPrintConfirm]       = useState<{ group: any } | null>(null)
+  const [printing, setPrinting]               = useState(false)
+  const serialPortRef = useRef<any>(null)
   const declineTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const audioRef      = useRef<HTMLAudioElement | null>(null)
   // PWA install prompt — captured from browser's beforeinstallprompt event
@@ -502,6 +507,149 @@ export default function AdminDashboard() {
     }
     return Array.from(map.values())
   })()
+
+  // ── Printer: connect via Web Serial API ─────────────────────────────────
+  const connectPrinter = async (): Promise<any> => {
+    try {
+      if (!(navigator as any).serial) {
+        alert('Web Serial API not supported. Use Chrome/Edge on desktop.')
+        return null
+      }
+      if (serialPortRef.current) return serialPortRef.current
+      const port = await (navigator as any).serial.requestPort()
+      await port.open({ baudRate: 9600 })
+      serialPortRef.current = port
+      return port
+    } catch (e: any) {
+      if (e?.name !== 'NotFoundError') console.error('Serial connect error:', e)
+      return null
+    }
+  }
+
+  // ── ESC/POS commands for thermal printer ─────────────────────────────────
+  const ESC = 0x1B
+  const GS  = 0x1D
+  const cmd = {
+    init:      [ESC, 0x40],
+    bold_on:   [ESC, 0x45, 0x01],
+    bold_off:  [ESC, 0x45, 0x00],
+    center:    [ESC, 0x61, 0x01],
+    left:      [ESC, 0x61, 0x00],
+    dbl_height:[ESC, 0x21, 0x10],
+    normal:    [ESC, 0x21, 0x00],
+    cut:       [GS,  0x56, 0x41, 0x00],
+    lf:        [0x0A],
+  }
+  const enc = new TextEncoder()
+  const bytes = (...chunks: (number[] | Uint8Array)[]) =>
+    new Uint8Array(chunks.flatMap(c => Array.from(c)))
+
+  const padLine = (left: string, right: string, width = 32) => {
+    const gap = width - left.length - right.length
+    return enc.encode(left + ' '.repeat(Math.max(1, gap)) + right)
+  }
+
+  const printBill = async (group: any) => {
+    setPrinting(true)
+    try {
+      const port = await connectPrinter()
+      if (!port) {
+        // Fallback: browser print
+        printBillBrowser(group)
+        setPrinting(false)
+        return
+      }
+
+      const writer = port.writable.getWriter()
+      const now = new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
+
+      const write = async (data: Uint8Array) => { await writer.write(data); }
+
+      await write(bytes(cmd.init))
+      await write(bytes(cmd.center, cmd.bold_on, cmd.dbl_height))
+      await write(enc.encode('Cafe Cookies\n'))
+      await write(bytes(cmd.normal, cmd.bold_off))
+      await write(enc.encode('--------------------------------\n'))
+      await write(bytes(cmd.left))
+      await write(enc.encode(\`Table: \${group.tableNumber}\n\`))
+      await write(enc.encode(\`Customer: \${group.customerNames.join(' & ')}\n\`))
+      await write(enc.encode(\`Date: \${now}\n\`))
+      if (group.orderIds.length > 1) await write(enc.encode(\`Orders: \${group.orderIds.length} merged\n\`))
+      await write(enc.encode('--------------------------------\n'))
+      await write(bytes(cmd.bold_on))
+      await write(padLine('ITEM', 'AMT'))
+      await write(bytes(cmd.lf, cmd.bold_off))
+      await write(enc.encode('--------------------------------\n'))
+
+      for (const item of group.items) {
+        const name = \`\${item.quantity}x \${item.item_name}\`.slice(0, 22)
+        const amt  = \`Rs.\${item.item_price * item.quantity}\`
+        await write(padLine(name, amt))
+        await write(bytes(cmd.lf))
+        if (item.add_ons?.length) {
+          await write(enc.encode(\`  + \${item.add_ons.map((a:any)=>a.name).join(', ')}\n\`))
+        }
+      }
+
+      await write(enc.encode('================================\n'))
+      await write(bytes(cmd.bold_on))
+      await write(padLine('TOTAL', \`Rs.\${group.totalAmount}\`))
+      await write(bytes(cmd.lf, cmd.bold_off))
+      await write(enc.encode('================================\n'))
+      await write(bytes(cmd.center))
+      await write(enc.encode('\nThank you for visiting!\n'))
+      await write(enc.encode('   Cafe Cookies  \n\n\n'))
+      await write(bytes(cmd.cut))
+
+      writer.releaseLock()
+    } catch (e) {
+      console.error('Print error:', e)
+      printBillBrowser(group)
+    }
+    setPrinting(false)
+  }
+
+  // ── Browser print fallback ────────────────────────────────────────────────
+  const printBillBrowser = (group: any) => {
+    const now = new Date().toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
+    const itemsHtml = group.items.map((item: any) => \`
+      <tr>
+        <td>\${item.quantity}x \${item.item_name}\${item.add_ons?.length ? '<br><small style="color:#666">+ ' + item.add_ons.map((a:any)=>a.name).join(', ') + '</small>' : ''}</td>
+        <td style="text-align:right">&#8377;\${item.item_price * item.quantity}</td>
+      </tr>\`).join('')
+    const html = \`<!DOCTYPE html><html><head><title>Bill - Table \${group.tableNumber}</title>
+    <style>
+      @page { size: 80mm auto; margin: 4mm; }
+      body { font-family: monospace; font-size: 12px; width: 72mm; }
+      h2 { text-align:center; margin:0; font-size:16px; }
+      .center { text-align:center; }
+      .divider { border-top: 1px dashed #000; margin: 6px 0; }
+      table { width:100%; border-collapse:collapse; }
+      td { padding: 2px 0; vertical-align:top; }
+      .total td { font-weight:bold; font-size:14px; border-top:2px solid #000; padding-top:6px; }
+    </style></head><body>
+    <h2>Cafe Cookies</h2>
+    <div class="center" style="font-size:11px">\${now}</div>
+    <div class="divider"></div>
+    <div>Table: <b>\${group.tableNumber}</b></div>
+    <div>Customer: <b>\${group.customerNames.join(' & ')}</b></div>
+    \${group.orderIds.length > 1 ? '<div>' + group.orderIds.length + ' orders merged</div>' : ''}
+    <div class="divider"></div>
+    <table>
+      <thead><tr><th style="text-align:left">Item</th><th style="text-align:right">Amt</th></tr></thead>
+      <tbody>\${itemsHtml}</tbody>
+      <tfoot class="total"><tr><td>TOTAL</td><td style="text-align:right">&#8377;\${group.totalAmount}</td></tr></tfoot>
+    </table>
+    <div class="divider"></div>
+    <div class="center" style="margin-top:8px">Thank you for visiting!<br>Cafe Cookies</div>
+    </body></html>\`
+    const w = window.open('', '_blank', 'width=400,height=600')
+    if (!w) return
+    w.document.write(html)
+    w.document.close()
+    w.focus()
+    setTimeout(() => { w.print(); w.close() }, 400)
+  }
 
   // Mark ALL orders in a merged bill group as paid in one go
   const markGroupAsPaid = async (orderIds: string[]) => {
@@ -1259,8 +1407,25 @@ export default function AdminDashboard() {
                         <span>{group.orderIds.length} order{group.orderIds.length > 1 ? 's' : ''}</span>
                       </div>
                     </div>
-                    <div className="p-4 bg-slate-950/50 border-t border-slate-800">
-                      <Button className="w-full bg-emerald-600 hover:bg-emerald-700 font-bold h-12 shadow-lg shadow-emerald-600/10" onClick={() => markGroupAsPaid(group.orderIds)} disabled={updatingPayment === group.orderIds[0]}>
+                    <div className="p-4 bg-slate-950/50 border-t border-slate-800 space-y-2">
+                      {/* Print Bill button */}
+                      <Button
+                        className="w-full bg-slate-700 hover:bg-slate-600 font-bold h-11 text-sm"
+                        onClick={() => printBill(group)}
+                        disabled={printing}
+                      >
+                        {printing ? (
+                          <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Printing...</span>
+                        ) : (
+                          <span className="flex items-center gap-2"><Download className="w-4 h-4" /> Print Bill</span>
+                        )}
+                      </Button>
+                      {/* Mark as Paid — triggers print confirm */}
+                      <Button
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 font-bold h-12 shadow-lg shadow-emerald-600/10"
+                        onClick={() => setPrintConfirm({ group })}
+                        disabled={updatingPayment === group.orderIds[0]}
+                      >
                         {updatingPayment === group.orderIds[0] ? (
                           <span className="flex items-center gap-2"><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Processing...</span>
                         ) : (
@@ -1976,6 +2141,89 @@ export default function AdminDashboard() {
       )}
 
       </div>
+
+      {/* ── PRINT CONFIRM MODAL ─────────────────────────────────────────────── */}
+      {printConfirm && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-80 shadow-2xl overflow-hidden">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <Receipt className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-white font-bold text-sm">Mark as Paid</p>
+                <p className="text-slate-400 text-xs">Table {printConfirm.group.tableNumber} · ₹{printConfirm.group.totalAmount}</p>
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-4">
+              <p className="text-slate-300 text-sm mb-4">Do you want to print the bill before marking as paid?</p>
+
+              {/* Bill preview */}
+              <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-3 mb-4 text-xs space-y-1">
+                <div className="flex justify-between text-slate-400 font-semibold border-b border-slate-700 pb-1 mb-2">
+                  <span>Item</span><span>Amt</span>
+                </div>
+                {printConfirm.group.items.slice(0, 5).map((item: any, i: number) => (
+                  <div key={i} className="flex justify-between text-slate-400">
+                    <span className="truncate mr-2">{item.quantity}x {item.item_name}</span>
+                    <span className="shrink-0">₹{item.item_price * item.quantity}</span>
+                  </div>
+                ))}
+                {printConfirm.group.items.length > 5 && (
+                  <p className="text-slate-600 text-[10px]">+{printConfirm.group.items.length - 5} more items</p>
+                )}
+                <div className="flex justify-between text-white font-bold border-t border-slate-700 pt-2 mt-1">
+                  <span>TOTAL</span><span>₹{printConfirm.group.totalAmount}</span>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="space-y-2">
+                {/* Yes Print + Mark Paid */}
+                <button
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold py-3 rounded-xl transition-all text-sm flex items-center justify-center gap-2"
+                  disabled={printing}
+                  onClick={async () => {
+                    const g = printConfirm.group
+                    setPrintConfirm(null)
+                    await printBill(g)
+                    await markGroupAsPaid(g.orderIds)
+                  }}
+                >
+                  {printing ? (
+                    <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Printing...</>
+                  ) : (
+                    <><Download className="w-4 h-4" /> Yes, Print & Mark Paid</>
+                  )}
+                </button>
+
+                {/* Skip print, just mark paid */}
+                <button
+                  className="w-full bg-slate-700 hover:bg-slate-600 active:scale-95 text-slate-200 font-semibold py-2.5 rounded-xl transition-all text-sm"
+                  onClick={async () => {
+                    const g = printConfirm.group
+                    setPrintConfirm(null)
+                    await markGroupAsPaid(g.orderIds)
+                  }}
+                >
+                  No, Just Mark Paid
+                </button>
+
+                {/* Cancel */}
+                <button
+                  className="w-full text-slate-500 hover:text-slate-300 text-sm py-2 transition-colors"
+                  onClick={() => setPrintConfirm(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── NEW ORDER ANIMATED POPUP ──────────────────────────────────────────── */}
       <style jsx global>{`
