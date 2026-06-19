@@ -8,13 +8,18 @@ const inter = Inter({ subsets: ["latin"] });
 
 // ✅ PWA Manifest aur Apple App settings add kiye
 export const metadata: Metadata = {
-  title: "Cafe POS Terminal",
-  description: "Secure Kitchen POS",
+  title: "Admin POS",
+  description: "Admin POS Terminal",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
-    title: "Cafe POS",
+    statusBarStyle: "black-translucent",
+    title: "TB Admin",
+    startupImage: "/apple-touch-icon.png",
+  },
+  icons: {
+    apple: "/apple-touch-icon.png",
+    icon: "/icon-192x192.png",
   },
 };
 
