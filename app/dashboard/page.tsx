@@ -9,7 +9,7 @@ import {
   LayoutDashboard, ShoppingBag, Clock,
   CheckCircle, ChefHat, LogOut,
   Receipt, History, CalendarDays, ArrowUpRight,
-  Bell, XCircle, Utensils, Search, Pencil, Trash2, Plus, X, Menu, Armchair, Users, Package,
+  Bell, XCircle, Utensils, Search, Pencil, Trash2, Plus, X, Menu, Armchair, Users, Package, Download,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -35,6 +35,9 @@ export default function AdminDashboard() {
   const [hiddenDeclined, setHiddenDeclined]   = useState<Set<string>>(new Set())
   const declineTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const audioRef      = useRef<HTMLAudioElement | null>(null)
+  // PWA install prompt — captured from browser's beforeinstallprompt event
+  const [installPrompt, setInstallPrompt]     = useState<any>(null)
+  const [showInstallBanner, setShowInstallBanner] = useState(false)
   const router        = useRouter()
 
   // ── Menu Control State ────────────────────────────────────────────────────
@@ -80,6 +83,38 @@ export default function AdminDashboard() {
     }
     checkAuth()
   }, [router])
+
+  // ── PWA Install Prompt ────────────────────────────────────────────────────
+  // Chrome fires 'beforeinstallprompt' when the app is installable.
+  // We intercept it, prevent the default mini-infobar, and show our own
+  // install button instead — this gives us full control over timing and
+  // allows re-triggering it even if the user dismissed Chrome's banner.
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault()          // stop Chrome's default mini-infobar
+      setInstallPrompt(e)         // save the event for later
+      setShowInstallBanner(true)  // show our custom install button
+    }
+    window.addEventListener('beforeinstallprompt', handler)
+
+    // If app is already installed, hide the button
+    window.addEventListener('appinstalled', () => {
+      setInstallPrompt(null)
+      setShowInstallBanner(false)
+    })
+
+    return () => window.removeEventListener('beforeinstallprompt', handler)
+  }, [])
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return
+    installPrompt.prompt()
+    const { outcome } = await installPrompt.userChoice
+    if (outcome === 'accepted') {
+      setInstallPrompt(null)
+      setShowInstallBanner(false)
+    }
+  }
 
   // ── Sync dinning_tables.status from orders ───────────────────────────────
   const syncTableStatuses = async (currentOrders: any[]) => {
@@ -151,7 +186,12 @@ export default function AdminDashboard() {
 
   // ── Realtime ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    audioRef.current = new Audio('/ding.mp3')
+    // Cache-bust: this app is a PWA (next-pwa) with aggressive asset caching.
+    // The service worker caches /ding.mp3 by URL — if you replace the file
+    // with a new tune but keep the same filename, the SW keeps serving the
+    // OLD cached version forever. Appending ?v=... forces it to be treated
+    // as a new resource. Bump this value any time you swap the audio file.
+    audioRef.current = new Audio('/ding.mp3?v=2')
     audioRef.current.loop = true   // keep ringing until accepted/declined
     audioRef.current.volume = 1.0
     // Preload so the very first play() call doesn't have to wait on a network fetch
@@ -785,9 +825,20 @@ export default function AdminDashboard() {
               </span>
             )}
           </button>
-          <h1 className="text-sm font-semibold text-slate-200">
+          <h1 className="text-sm font-semibold text-slate-200 flex-1">
             {NAV.find(n => n.key === activeTab)?.label ?? 'Dashboard'}
           </h1>
+
+          {/* PWA Install Button — appears whenever browser says app is installable */}
+          {showInstallBanner && installPrompt && (
+            <button
+              onClick={handleInstallClick}
+              className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-colors shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Install App
+            </button>
+          )}
         </header>
 
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
