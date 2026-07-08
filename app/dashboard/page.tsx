@@ -22,6 +22,34 @@ const PREP_BADGE: Record<string, { label: string; emoji: string; cls: string }> 
   Jain:    { label: 'Jain',    emoji: '🌿', cls: 'bg-green-900/40 text-green-300 border-green-700/50' },
 }
 
+const handleSendWhatsApp = (order: any) => {
+  if (!order.phone_number || order.phone_number.length < 10) {
+    alert("Is order mein valid phone number nahi hai bhai!");
+    return;
+  }
+
+  // Tumhari admin app ka domain (jahan receipt host hogi)
+  // Local testing ke time ye http://localhost:3000 uthayega, Vercel pe asli domain.
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const billLink = `${baseUrl}/receipt/${order.id}`;
+
+  const message = `*Cafe POS* 🍔\n\n` +
+                  `Hello *${order.customer_name || 'Guest'}*,\n` +
+                  `Thank you for your order!\n\n` +
+                  `🔢 *Token Number:* #${order.table_number}\n` +
+                  `💰 *Total Amount:* ₹${order.total_amount}\n\n` +
+                  `📝 *View Your Digital Bill Here:*\n${billLink}\n\n` +
+                  `Visit again! ❤️`;
+
+  const encodedMessage = encodeURIComponent(message);
+  const whatsappUrl = `https://api.whatsapp.com/send?phone=91${order.phone_number}&text=${encodedMessage}`;
+
+  // Naye tab mein WhatsApp open karega
+  window.open(whatsappUrl, '_blank');
+};
+
+
+
 export default function AdminDashboard() {
   const [activeTab, setActiveTab]             = useState('dashboard')
   const [sidebarOpen, setSidebarOpen]         = useState(true)
@@ -1022,6 +1050,11 @@ export default function AdminDashboard() {
                           <div>
                             <h3 className="text-xl md:text-2xl font-bold text-white">Table {order.table_number}</h3>
                             <p className="text-sm text-slate-400 mt-0.5 capitalize">{order.customer_name}</p>
+                            {order.phone_number && (
+                            <p className="text-sm text-gray-500 flex items-center gap-1">
+                            📞 +91 {order.phone_number}
+                             </p>
+                             )}
                             <p className="text-xs text-slate-600 mt-1">{new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
                           </div>
                           <span className="px-3 py-1 text-xs font-bold rounded-lg border uppercase tracking-wider bg-sky-500/10 text-sky-400 border-sky-500/20 animate-pulse">NEW</span>
@@ -1420,6 +1453,25 @@ export default function AdminDashboard() {
                           <span className="flex items-center gap-2"><Download className="w-4 h-4" /> Print Bill</span>
                         )}
                       </Button>
+                      {/* 🟢 NAYA WHATSAPP BILL BUTTON 🟢 */}
+                      {(() => {
+                        // Group ke first order se phone number nikal rahe hain
+                        const orderWithPhone = orders.find(o => o.id === group.orderIds[0]);
+                        if (orderWithPhone?.phone_number && orderWithPhone.phone_number.length >= 10) {
+                          return (
+                            <Button
+                              className="w-full bg-[#25D366] hover:bg-[#1DA851] text-white font-bold h-11 text-sm shadow-lg shadow-green-900/20"
+                              onClick={() => handleSendWhatsApp({
+                                ...orderWithPhone,
+                                total_amount: group.totalAmount // Agar multiple orders merge hue hain toh total bhejo
+                              })}
+                            >
+                              <span className="flex items-center gap-2">💬 Send WhatsApp Bill</span>
+                            </Button>
+                          );
+                        }
+                        return null; // Agar phone number nahi hai toh button chup jayega
+                      })()}
                       {/* Mark as Paid — triggers print confirm */}
                       <Button
                         className="w-full bg-emerald-600 hover:bg-emerald-700 font-bold h-12 shadow-lg shadow-emerald-600/10"
