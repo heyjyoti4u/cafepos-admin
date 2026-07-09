@@ -36,11 +36,11 @@ const handleSendWhatsApp = (order: any) => {
 
   *Cafe POS* 🍔\n\n +
                   Hello *${order.customer_name || 'Guest'}*,\n +
-                  Thank you for your order. Here are your order details:!\n\n +
+                  Thank you for your order!\n\n +
                   🔢 *Token Number:* #${order.table_number}\n +
-                  💳 *Total Amount:* ₹${order.total_amount}\n\n +
+                  💰 *Total Amount:* ₹${order.total_amount}\n\n +
                   📝 *View Your Digital Bill Here:*\n${billLink}\n\n +
-                  We appreciate your visit and look forward to serving you again. 🙏;
+                  Visit again! ❤️;
 
   const encodedMessage = encodeURIComponent(message);
   const whatsappUrl = `https://api.whatsapp.com/send?phone=91${order.phone_number}&text=${encodedMessage}`;
