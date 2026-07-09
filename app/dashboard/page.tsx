@@ -34,13 +34,13 @@ const handleSendWhatsApp = (order: any) => {
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const billLink = `${baseUrl}/receipt/${order.id}`;
 
-  *Cafe POS* 🍔\n\n +
-                  Hello *${order.customer_name || 'Guest'}*,\n +
-                  Thank you for your order!\n\n +
-                  🔢 *Token Number:* #${order.table_number}\n +
-                  💰 *Total Amount:* ₹${order.total_amount}\n\n +
-                  📝 *View Your Digital Bill Here:*\n${billLink}\n\n +
-                  Visit again! ❤️;
+  const message = `☕ *Cafe POS* — Order Confirmation\n\n` +
+                  `Dear *${order.customer_name || 'Guest'}*,\n` +
+                  `Thank you for your order. Here are your order details:\n\n` +
+                  `🎫 *Token Number:* #${order.table_number}\n` +
+                  `💳 *Total Amount:* ₹${order.total_amount}\n\n` +
+                  `🧾 *View your digital bill:*\n${billLink}\n\n` +
+                  `We appreciate your visit and look forward to serving you again. 🙏`;
 
   const encodedMessage = encodeURIComponent(message);
   const whatsappUrl = `https://api.whatsapp.com/send?phone=91${order.phone_number}&text=${encodedMessage}`;
