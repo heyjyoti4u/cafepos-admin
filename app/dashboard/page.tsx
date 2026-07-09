@@ -33,7 +33,8 @@ const handleSendWhatsApp = (order: any) => {
   // Local testing ke time ye http://localhost:3000 uthayega, Vercel pe asli domain.
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const billLink = `${baseUrl}/receipt/${order.id}`;
-  
+
+  *Cafe POS* 🍔\n\n +
                   Hello *${order.customer_name || 'Guest'}*,\n +
                   Thank you for your order. Here are your order details:!\n\n +
                   🔢 *Token Number:* #${order.table_number}\n +
