@@ -10,6 +10,7 @@ import {
   CheckCircle, ChefHat, LogOut,
   Receipt, History, CalendarDays, ArrowUpRight,
   Bell, XCircle, Utensils, Search, Pencil, Trash2, Plus, X, Menu, Armchair, Users, Package, Download,
+  Boxes, AlertTriangle, Minus,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -78,6 +79,11 @@ export default function AdminDashboard() {
   const [menuLoading, setMenuLoading]   = useState(false)
   const [menuSearch, setMenuSearch]     = useState('')
   const [togglingId, setTogglingId]     = useState<string | null>(null)
+
+  // ── Inventory State ────────────────────────────────────────────────────────
+  const [invSearch, setInvSearch]       = useState('')
+  const [updatingStock, setUpdatingStock] = useState<string | null>(null)
+  const LOW_STOCK_THRESHOLD = 5
 
   // ── Order Edit State ──────────────────────────────────────────────────────
   const [editingOrder, setEditingOrder]         = useState<any | null>(null)
@@ -217,6 +223,23 @@ export default function AdminDashboard() {
     setTogglingId(null)
   }
 
+  const updateStockQuantity = async (id: string, newQty: number) => {
+    if (newQty < 0 || Number.isNaN(newQty)) return
+    const prevItem = menuItems.find(i => i.id === id)
+    const prevQty = prevItem?.stock_quantity ?? 0
+    setMenuItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: newQty } : i))
+    setUpdatingStock(id)
+    const { error } = await supabase
+      .from('menu_items')
+      .update({ stock_quantity: newQty })
+      .eq('id', id)
+    if (error) {
+      console.error('❌ Stock update error:', error)
+      setMenuItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: prevQty } : i))
+    }
+    setUpdatingStock(null)
+  }
+
   // ── Realtime ──────────────────────────────────────────────────────────────
   useEffect(() => {
     // Cache-bust: this app is a PWA (next-pwa) with aggressive asset caching.
@@ -260,7 +283,7 @@ export default function AdminDashboard() {
 
   // Fetch menu items when tab opens
   useEffect(() => {
-    if (activeTab === 'menu_control' && menuItems.length === 0) fetchMenuItems()
+    if ((activeTab === 'menu_control' || activeTab === 'inventory') && menuItems.length === 0) fetchMenuItems()
   }, [activeTab])
 
   // ── Auto-delete declined orders from DB after 15s ────────────────────────
@@ -831,6 +854,20 @@ export default function AdminDashboard() {
   }, {} as Record<string, any[]>)
   const unavailableCount = menuItems.filter(i => !i.is_available).length
 
+  // ── Inventory Derived ────────────────────────────────────────────────────
+  const filteredInventory = menuItems.filter(i =>
+    i.name.toLowerCase().includes(invSearch.toLowerCase()) ||
+    i.category?.toLowerCase().includes(invSearch.toLowerCase())
+  )
+  const groupedInventory = filteredInventory.reduce((acc, item) => {
+    const cat = item.category || 'Other'
+    if (!acc[cat]) acc[cat] = []
+    acc[cat].push(item)
+    return acc
+  }, {} as Record<string, any[]>)
+  const outOfStockCount = menuItems.filter(i => (i.stock_quantity ?? 0) <= 0).length
+  const lowStockCount   = menuItems.filter(i => (i.stock_quantity ?? 0) > 0 && (i.stock_quantity ?? 0) <= LOW_STOCK_THRESHOLD).length
+
   if (!authChecked) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-950">
@@ -905,6 +942,7 @@ export default function AdminDashboard() {
     { key: 'tables_board',  Icon: Armchair,      label: 'Tables',    badge: occupiedCount },
     { key: 'payments',      Icon: Receipt,       label: 'Payments',  badge: unpaidBillGroups.length },
     { key: 'menu_control',  Icon: Utensils,      label: 'Menu',      badge: unavailableCount > 0 ? unavailableCount : 0 },
+    { key: 'inventory',     Icon: Boxes,         label: 'Inventory', badge: outOfStockCount + lowStockCount > 0 ? outOfStockCount + lowStockCount : 0, highlight: outOfStockCount > 0 },
     { key: 'history',       Icon: History,       label: 'History' },
     { key: 'takeaway',      Icon: Package,       label: 'Takeaway' },
     { key: 'staff',         Icon: Users,         label: 'Staff' },
@@ -1908,6 +1946,159 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── TAB: INVENTORY ── */}
+        {activeTab === 'inventory' && (
+          <div className="max-w-3xl mx-auto">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-xl md:text-3xl font-bold text-white">Inventory Management</h1>
+                <p className="text-slate-500 text-sm mt-1">
+                  Track stock quantity and switch items off when unavailable.
+                  {outOfStockCount > 0 && (
+                    <span className="ml-2 text-red-400 font-semibold">{outOfStockCount} out of stock</span>
+                  )}
+                  {lowStockCount > 0 && (
+                    <span className="ml-2 text-amber-400 font-semibold">{lowStockCount} low stock</span>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={fetchMenuItems}
+                className="text-xs text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-600 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Refresh
+              </button>
+            </div>
+
+            {/* Summary cards */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                <p className="text-lg font-bold text-slate-200">{menuItems.length}</p>
+                <p className="text-xs text-slate-500">Total Items</p>
+              </div>
+              <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 text-center">
+                <p className="text-lg font-bold text-amber-400">{lowStockCount}</p>
+                <p className="text-xs text-slate-500">Low Stock</p>
+              </div>
+              <div className="bg-slate-900 border border-red-900/40 rounded-xl p-3 text-center">
+                <p className="text-lg font-bold text-red-400">{outOfStockCount}</p>
+                <p className="text-xs text-slate-500">Out of Stock</p>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="relative mb-6">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search items or category..."
+                value={invSearch}
+                onChange={e => setInvSearch(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+              />
+            </div>
+
+            {menuLoading ? (
+              <div className="text-center py-20 text-slate-500">
+                <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading inventory...
+              </div>
+            ) : menuItems.length === 0 ? (
+              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                <p className="text-slate-400">No items found in database.</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {(Object.entries(groupedInventory) as [string, any[]][]).map(([category, items]) => (
+                  <div key={category} className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                    {/* Category header */}
+                    <div className="px-4 py-3 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+                      <h3 className="font-bold text-slate-200 text-sm uppercase tracking-wider">{category}</h3>
+                      <span className="text-xs text-slate-500">{items.length} item{items.length > 1 ? 's' : ''}</span>
+                    </div>
+
+                    {/* Items */}
+                    <div className="divide-y divide-slate-800">
+                      {items.map(item => {
+                        const qty = item.stock_quantity ?? 0
+                        const isOut = qty <= 0
+                        const isLow = !isOut && qty <= LOW_STOCK_THRESHOLD
+                        return (
+                          <div
+                            key={item.id}
+                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3.5 transition-all ${!item.is_available ? 'opacity-50' : ''}`}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              {/* Veg / Non-veg dot */}
+                              <div className={`w-3.5 h-3.5 rounded-sm border-2 flex items-center justify-center shrink-0 ${item.is_veg !== false ? 'border-green-500' : 'border-red-500'}`}>
+                                <div className={`w-1.5 h-1.5 rounded-full ${item.is_veg !== false ? 'bg-green-500' : 'bg-red-500'}`} />
+                              </div>
+                              <div className="min-w-0">
+                                <p className={`text-sm font-semibold truncate ${item.is_available ? 'text-slate-200' : 'text-slate-500 line-through'}`}>
+                                  {item.name}
+                                </p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <p className="text-xs text-slate-500">₹{item.price}</p>
+                                  {isOut && (
+                                    <span className="flex items-center gap-1 text-[10px] font-semibold text-red-400 bg-red-900/30 border border-red-800/50 px-1.5 py-0.5 rounded">
+                                      <AlertTriangle className="w-3 h-3" /> Out of stock
+                                    </span>
+                                  )}
+                                  {isLow && (
+                                    <span className="text-[10px] font-semibold text-amber-400 bg-amber-900/30 border border-amber-800/50 px-1.5 py-0.5 rounded">
+                                      Low stock
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-4 shrink-0 sm:ml-3">
+                              {/* Stock quantity stepper */}
+                              <div className="flex items-center gap-1 bg-slate-800/70 border border-slate-700 rounded-lg px-1">
+                                <button
+                                  onClick={() => updateStockQuantity(item.id, qty - 1)}
+                                  disabled={updatingStock === item.id || qty <= 0}
+                                  className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <input
+                                  type="number"
+                                  value={qty}
+                                  onChange={e => setMenuItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: Number(e.target.value) } : i))}
+                                  onBlur={e => updateStockQuantity(item.id, Number(e.target.value))}
+                                  className="w-12 bg-transparent text-center text-sm font-semibold text-slate-200 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                                <button
+                                  onClick={() => updateStockQuantity(item.id, qty + 1)}
+                                  disabled={updatingStock === item.id}
+                                  className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              {/* On/Off toggle */}
+                              <Switch
+                                checked={item.is_available}
+                                onCheckedChange={val => toggleMenuItem(item.id, val)}
+                                disabled={togglingId === item.id}
+                                className="data-[state=checked]:bg-orange-500"
+                              />
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 ))}
