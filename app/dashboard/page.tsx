@@ -84,6 +84,22 @@ export default function AdminDashboard() {
   const [invSearch, setInvSearch]       = useState('')
   const [updatingStock, setUpdatingStock] = useState<string | null>(null)
   const LOW_STOCK_THRESHOLD = 5
+  const [invView, setInvView]           = useState<'menu' | 'ingredients'>('menu')
+
+  // ── Ingredients / Raw Materials State ───────────────────────────────────────
+  const [ingredients, setIngredients]         = useState<any[]>([])
+  const [ingredientsLoading, setIngredientsLoading] = useState(false)
+  const [ingSearch, setIngSearch]             = useState('')
+  const [newIngName, setNewIngName]           = useState('')
+  const [newIngQty, setNewIngQty]             = useState('')
+  const [newIngUnit, setNewIngUnit]           = useState('kg')
+  const [addingIngredient, setAddingIngredient] = useState(false)
+  const [updatingIngId, setUpdatingIngId]     = useState<string | null>(null)
+  const [deletingIngId, setDeletingIngId]     = useState<string | null>(null)
+
+  // ── Master ON/OFF (whole menu) State ────────────────────────────────────────
+  const [masterToggleConfirm, setMasterToggleConfirm] = useState<'on' | 'off' | null>(null)
+  const [masterToggling, setMasterToggling]   = useState(false)
 
   // ── Order Edit State ──────────────────────────────────────────────────────
   const [editingOrder, setEditingOrder]         = useState<any | null>(null)
@@ -240,6 +256,91 @@ export default function AdminDashboard() {
     setUpdatingStock(null)
   }
 
+  // ── Master ON/OFF: switch the entire menu on or off in one shot ────────────
+  const bulkSetAvailability = async (value: boolean) => {
+    setMasterToggling(true)
+    const prevSnapshot = menuItems
+    setMenuItems(prev => prev.map(i => ({ ...i, is_available: value })))
+    const { error } = await supabase
+      .from('menu_items')
+      .update({ is_available: value })
+      .not('id', 'is', null) // matches every row
+    if (error) {
+      console.error('❌ Bulk toggle error:', error)
+      setMenuItems(prevSnapshot)
+    }
+    setMasterToggling(false)
+    setMasterToggleConfirm(null)
+  }
+
+  // ── Ingredients / Raw Materials ──────────────────────────────────────────────
+  const fetchIngredients = async () => {
+    setIngredientsLoading(true)
+    const { data, error } = await supabase
+      .from('ingredients')
+      .select('*')
+      .order('name')
+    if (error) { console.error('fetchIngredients error:', error); setIngredientsLoading(false); return }
+    if (data) setIngredients(data)
+    setIngredientsLoading(false)
+  }
+
+  const addIngredient = async () => {
+    if (!newIngName.trim()) return
+    setAddingIngredient(true)
+    const { data, error } = await supabase
+      .from('ingredients')
+      .insert({
+        name: newIngName.trim(),
+        unit: newIngUnit,
+        quantity: Number(newIngQty) || 0,
+        low_stock_threshold: 5,
+      })
+      .select()
+      .single()
+    if (error) {
+      console.error('❌ addIngredient error:', error)
+      setAddingIngredient(false)
+      return
+    }
+    if (data) setIngredients(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+    setNewIngName('')
+    setNewIngQty('')
+    setAddingIngredient(false)
+  }
+
+  const updateIngredientQty = async (id: string, newQty: number) => {
+    if (newQty < 0 || Number.isNaN(newQty)) return
+    const prevItem = ingredients.find(i => i.id === id)
+    const prevQty = prevItem?.quantity ?? 0
+    setIngredients(prev => prev.map(i => i.id === id ? { ...i, quantity: newQty } : i))
+    setUpdatingIngId(id)
+    const { error } = await supabase
+      .from('ingredients')
+      .update({ quantity: newQty })
+      .eq('id', id)
+    if (error) {
+      console.error('❌ updateIngredientQty error:', error)
+      setIngredients(prev => prev.map(i => i.id === id ? { ...i, quantity: prevQty } : i))
+    }
+    setUpdatingIngId(null)
+  }
+
+  const deleteIngredient = async (id: string) => {
+    setDeletingIngId(id)
+    const prevSnapshot = ingredients
+    setIngredients(prev => prev.filter(i => i.id !== id))
+    const { error } = await supabase
+      .from('ingredients')
+      .delete()
+      .eq('id', id)
+    if (error) {
+      console.error('❌ deleteIngredient error:', error)
+      setIngredients(prevSnapshot)
+    }
+    setDeletingIngId(null)
+  }
+
   // ── Realtime ──────────────────────────────────────────────────────────────
   useEffect(() => {
     // Cache-bust: this app is a PWA (next-pwa) with aggressive asset caching.
@@ -285,6 +386,11 @@ export default function AdminDashboard() {
   useEffect(() => {
     if ((activeTab === 'menu_control' || activeTab === 'inventory') && menuItems.length === 0) fetchMenuItems()
   }, [activeTab])
+
+  // Fetch ingredients when ingredients view opened
+  useEffect(() => {
+    if (activeTab === 'inventory' && invView === 'ingredients' && ingredients.length === 0) fetchIngredients()
+  }, [activeTab, invView])
 
   // ── Auto-delete declined orders from DB after 15s ────────────────────────
   useEffect(() => {
@@ -853,6 +959,7 @@ export default function AdminDashboard() {
     return acc
   }, {} as Record<string, any[]>)
   const unavailableCount = menuItems.filter(i => !i.is_available).length
+  const allMenuAvailable = menuItems.length > 0 && unavailableCount === 0
 
   // ── Inventory Derived ────────────────────────────────────────────────────
   const filteredInventory = menuItems.filter(i =>
@@ -867,6 +974,12 @@ export default function AdminDashboard() {
   }, {} as Record<string, any[]>)
   const outOfStockCount = menuItems.filter(i => (i.stock_quantity ?? 0) <= 0).length
   const lowStockCount   = menuItems.filter(i => (i.stock_quantity ?? 0) > 0 && (i.stock_quantity ?? 0) <= LOW_STOCK_THRESHOLD).length
+
+  const filteredIngredients = ingredients.filter(i =>
+    i.name.toLowerCase().includes(ingSearch.toLowerCase())
+  )
+  const lowStockIngredientsCount = ingredients.filter(i => (i.quantity ?? 0) > 0 && (i.quantity ?? 0) <= (i.low_stock_threshold ?? 5)).length
+  const outOfStockIngredientsCount = ingredients.filter(i => (i.quantity ?? 0) <= 0).length
 
   if (!authChecked) {
     return (
@@ -1881,6 +1994,22 @@ export default function AdminDashboard() {
               </button>
             </div>
 
+            {/* Master ON/OFF — whole restaurant switch */}
+            <div className={`flex items-center justify-between gap-3 mb-6 rounded-xl border px-4 py-3.5 ${allMenuAvailable ? 'bg-emerald-950/30 border-emerald-800/40' : 'bg-red-950/30 border-red-800/40'}`}>
+              <div>
+                <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
+              </div>
+              <Switch
+                checked={allMenuAvailable}
+                onCheckedChange={val => setMasterToggleConfirm(val ? 'on' : 'off')}
+                disabled={masterToggling || menuItems.length === 0}
+                className="data-[state=checked]:bg-emerald-500"
+              />
+            </div>
+
             {/* Search */}
             <div className="relative mb-6">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -1957,152 +2086,347 @@ export default function AdminDashboard() {
         {/* ── TAB: INVENTORY ── */}
         {activeTab === 'inventory' && (
           <div className="max-w-3xl mx-auto">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 border-b border-slate-800 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 border-b border-slate-800 pb-4">
               <div>
                 <h1 className="text-xl md:text-3xl font-bold text-white">Inventory Management</h1>
                 <p className="text-slate-500 text-sm mt-1">
-                  Track stock quantity and switch items off when unavailable.
-                  {outOfStockCount > 0 && (
+                  {invView === 'menu'
+                    ? 'Track stock quantity and switch items off when unavailable.'
+                    : 'Raw materials jaise sabziyan, masale — manually add aur manage karo.'}
+                  {invView === 'menu' && outOfStockCount > 0 && (
                     <span className="ml-2 text-red-400 font-semibold">{outOfStockCount} out of stock</span>
                   )}
-                  {lowStockCount > 0 && (
+                  {invView === 'menu' && lowStockCount > 0 && (
                     <span className="ml-2 text-amber-400 font-semibold">{lowStockCount} low stock</span>
+                  )}
+                  {invView === 'ingredients' && outOfStockIngredientsCount > 0 && (
+                    <span className="ml-2 text-red-400 font-semibold">{outOfStockIngredientsCount} khatam</span>
+                  )}
+                  {invView === 'ingredients' && lowStockIngredientsCount > 0 && (
+                    <span className="ml-2 text-amber-400 font-semibold">{lowStockIngredientsCount} kam bacha</span>
                   )}
                 </p>
               </div>
               <button
-                onClick={fetchMenuItems}
+                onClick={() => invView === 'menu' ? fetchMenuItems() : fetchIngredients()}
                 className="text-xs text-slate-500 hover:text-slate-300 border border-slate-700 hover:border-slate-600 px-3 py-1.5 rounded-lg transition-colors"
               >
                 Refresh
               </button>
             </div>
 
-            {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-3 mb-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
-                <p className="text-lg font-bold text-slate-200">{menuItems.length}</p>
-                <p className="text-xs text-slate-500">Total Items</p>
-              </div>
-              <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 text-center">
-                <p className="text-lg font-bold text-amber-400">{lowStockCount}</p>
-                <p className="text-xs text-slate-500">Low Stock</p>
-              </div>
-              <div className="bg-slate-900 border border-red-900/40 rounded-xl p-3 text-center">
-                <p className="text-lg font-bold text-red-400">{outOfStockCount}</p>
-                <p className="text-xs text-slate-500">Out of Stock</p>
-              </div>
+            {/* Segmented control: Menu Stock vs Raw Ingredients */}
+            <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-xl p-1 mb-6 w-full sm:w-fit">
+              <button
+                onClick={() => setInvView('menu')}
+                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${invView === 'menu' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Menu Items
+              </button>
+              <button
+                onClick={() => setInvView('ingredients')}
+                className={`flex-1 sm:flex-none px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${invView === 'ingredients' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                Ingredients
+              </button>
             </div>
 
-            {/* Search */}
-            <div className="relative mb-6">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-              <input
-                type="text"
-                placeholder="Search items or category..."
-                value={invSearch}
-                onChange={e => setInvSearch(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
-              />
-            </div>
+            {invView === 'menu' && (
+              <>
+                {/* Master ON/OFF — whole restaurant switch */}
+                <div className={`flex items-center justify-between gap-3 mb-6 rounded-xl border px-4 py-3.5 ${allMenuAvailable ? 'bg-emerald-950/30 border-emerald-800/40' : 'bg-red-950/30 border-red-800/40'}`}>
+                  <div>
+                    <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
+                      {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
+                  </div>
+                  <Switch
+                    checked={allMenuAvailable}
+                    onCheckedChange={val => setMasterToggleConfirm(val ? 'on' : 'off')}
+                    disabled={masterToggling || menuItems.length === 0}
+                    className="data-[state=checked]:bg-emerald-500"
+                  />
+                </div>
 
-            {menuLoading ? (
-              <div className="text-center py-20 text-slate-500">
-                <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-                Loading inventory...
-              </div>
-            ) : menuItems.length === 0 ? (
-              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
-                <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-                <p className="text-slate-400">No items found in database.</p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {(Object.entries(groupedInventory) as [string, any[]][]).map(([category, items]) => (
-                  <div key={category} className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
-                    {/* Category header */}
-                    <div className="px-4 py-3 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
-                      <h3 className="font-bold text-slate-200 text-sm uppercase tracking-wider">{category}</h3>
-                      <span className="text-xs text-slate-500">{items.length} item{items.length > 1 ? 's' : ''}</span>
-                    </div>
+                {/* Summary cards */}
+                <div className="grid grid-cols-3 gap-3 mb-6">
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-slate-200">{menuItems.length}</p>
+                    <p className="text-xs text-slate-500">Total Items</p>
+                  </div>
+                  <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-amber-400">{lowStockCount}</p>
+                    <p className="text-xs text-slate-500">Low Stock</p>
+                  </div>
+                  <div className="bg-slate-900 border border-red-900/40 rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-red-400">{outOfStockCount}</p>
+                    <p className="text-xs text-slate-500">Out of Stock</p>
+                  </div>
+                </div>
 
-                    {/* Items */}
-                    <div className="divide-y divide-slate-800">
-                      {items.map(item => {
-                        const qty = item.stock_quantity ?? 0
-                        const isOut = qty <= 0
-                        const isLow = !isOut && qty <= LOW_STOCK_THRESHOLD
-                        return (
-                          <div
-                            key={item.id}
-                            className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3.5 transition-all ${!item.is_available ? 'opacity-50' : ''}`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              {/* Veg / Non-veg dot */}
-                              <div className={`w-3.5 h-3.5 rounded-sm border-2 flex items-center justify-center shrink-0 ${item.is_veg !== false ? 'border-green-500' : 'border-red-500'}`}>
-                                <div className={`w-1.5 h-1.5 rounded-full ${item.is_veg !== false ? 'bg-green-500' : 'bg-red-500'}`} />
-                              </div>
-                              <div className="min-w-0">
-                                <p className={`text-sm font-semibold truncate ${item.is_available ? 'text-slate-200' : 'text-slate-500 line-through'}`}>
-                                  {item.name}
-                                </p>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <p className="text-xs text-slate-500">₹{item.price}</p>
-                                  {isOut && (
-                                    <span className="flex items-center gap-1 text-[10px] font-semibold text-red-400 bg-red-900/30 border border-red-800/50 px-1.5 py-0.5 rounded">
-                                      <AlertTriangle className="w-3 h-3" /> Out of stock
-                                    </span>
-                                  )}
-                                  {isLow && (
-                                    <span className="text-[10px] font-semibold text-amber-400 bg-amber-900/30 border border-amber-800/50 px-1.5 py-0.5 rounded">
-                                      Low stock
-                                    </span>
-                                  )}
+                {/* Search */}
+                <div className="relative mb-6">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Search items or category..."
+                    value={invSearch}
+                    onChange={e => setInvSearch(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+                  />
+                </div>
+
+                {menuLoading ? (
+                  <div className="text-center py-20 text-slate-500">
+                    <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    Loading inventory...
+                  </div>
+                ) : menuItems.length === 0 ? (
+                  <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                    <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                    <p className="text-slate-400">No items found in database.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {(Object.entries(groupedInventory) as [string, any[]][]).map(([category, items]) => (
+                      <div key={category} className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
+                        {/* Category header */}
+                        <div className="px-4 py-3 bg-slate-800/60 border-b border-slate-800 flex items-center justify-between">
+                          <h3 className="font-bold text-slate-200 text-sm uppercase tracking-wider">{category}</h3>
+                          <span className="text-xs text-slate-500">{items.length} item{items.length > 1 ? 's' : ''}</span>
+                        </div>
+
+                        {/* Items */}
+                        <div className="divide-y divide-slate-800">
+                          {items.map(item => {
+                            const qty = item.stock_quantity ?? 0
+                            const isOut = qty <= 0
+                            const isLow = !isOut && qty <= LOW_STOCK_THRESHOLD
+                            return (
+                              <div
+                                key={item.id}
+                                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3.5 transition-all ${!item.is_available ? 'opacity-50' : ''}`}
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  {/* Veg / Non-veg dot */}
+                                  <div className={`w-3.5 h-3.5 rounded-sm border-2 flex items-center justify-center shrink-0 ${item.is_veg !== false ? 'border-green-500' : 'border-red-500'}`}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${item.is_veg !== false ? 'bg-green-500' : 'bg-red-500'}`} />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className={`text-sm font-semibold truncate ${item.is_available ? 'text-slate-200' : 'text-slate-500 line-through'}`}>
+                                      {item.name}
+                                    </p>
+                                    <div className="flex items-center gap-2 mt-0.5">
+                                      <p className="text-xs text-slate-500">₹{item.price}</p>
+                                      {isOut && (
+                                        <span className="flex items-center gap-1 text-[10px] font-semibold text-red-400 bg-red-900/30 border border-red-800/50 px-1.5 py-0.5 rounded">
+                                          <AlertTriangle className="w-3 h-3" /> Out of stock
+                                        </span>
+                                      )}
+                                      {isLow && (
+                                        <span className="text-[10px] font-semibold text-amber-400 bg-amber-900/30 border border-amber-800/50 px-1.5 py-0.5 rounded">
+                                          Low stock
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-4 shrink-0 sm:ml-3">
+                                  {/* Stock quantity stepper */}
+                                  <div className="flex items-center gap-1 bg-slate-800/70 border border-slate-700 rounded-lg px-1">
+                                    <button
+                                      onClick={() => updateStockQuantity(item.id, qty - 1)}
+                                      disabled={updatingStock === item.id || qty <= 0}
+                                      className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <input
+                                      type="number"
+                                      value={qty}
+                                      onChange={e => setMenuItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: Number(e.target.value) } : i))}
+                                      onBlur={e => updateStockQuantity(item.id, Number(e.target.value))}
+                                      className="w-12 bg-transparent text-center text-sm font-semibold text-slate-200 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <button
+                                      onClick={() => updateStockQuantity(item.id, qty + 1)}
+                                      disabled={updatingStock === item.id}
+                                      className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+
+                                  {/* On/Off toggle */}
+                                  <Switch
+                                    checked={item.is_available}
+                                    onCheckedChange={val => toggleMenuItem(item.id, val)}
+                                    disabled={togglingId === item.id}
+                                    className="data-[state=checked]:bg-orange-500"
+                                  />
                                 </div>
                               </div>
-                            </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
 
-                            <div className="flex items-center gap-4 shrink-0 sm:ml-3">
-                              {/* Stock quantity stepper */}
-                              <div className="flex items-center gap-1 bg-slate-800/70 border border-slate-700 rounded-lg px-1">
-                                <button
-                                  onClick={() => updateStockQuantity(item.id, qty - 1)}
-                                  disabled={updatingStock === item.id || qty <= 0}
-                                  className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                  <Minus className="w-3.5 h-3.5" />
-                                </button>
-                                <input
-                                  type="number"
-                                  value={qty}
-                                  onChange={e => setMenuItems(prev => prev.map(i => i.id === item.id ? { ...i, stock_quantity: Number(e.target.value) } : i))}
-                                  onBlur={e => updateStockQuantity(item.id, Number(e.target.value))}
-                                  className="w-12 bg-transparent text-center text-sm font-semibold text-slate-200 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                />
-                                <button
-                                  onClick={() => updateStockQuantity(item.id, qty + 1)}
-                                  disabled={updatingStock === item.id}
-                                  className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                  <Plus className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+            {invView === 'ingredients' && (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-3 gap-3 mb-6">
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-slate-200">{ingredients.length}</p>
+                    <p className="text-xs text-slate-500">Total Items</p>
+                  </div>
+                  <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-amber-400">{lowStockIngredientsCount}</p>
+                    <p className="text-xs text-slate-500">Kam Bacha</p>
+                  </div>
+                  <div className="bg-slate-900 border border-red-900/40 rounded-xl p-3 text-center">
+                    <p className="text-lg font-bold text-red-400">{outOfStockIngredientsCount}</p>
+                    <p className="text-xs text-slate-500">Khatam</p>
+                  </div>
+                </div>
 
-                              {/* On/Off toggle */}
-                              <Switch
-                                checked={item.is_available}
-                                onCheckedChange={val => toggleMenuItem(item.id, val)}
-                                disabled={togglingId === item.id}
-                                className="data-[state=checked]:bg-orange-500"
-                              />
+                {/* Add new ingredient form */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6">
+                  <h3 className="text-sm font-bold text-slate-200 mb-3">Naya Ingredient Add Karo</h3>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      placeholder="Naam (jaise Tomato, Onion, Paneer...)"
+                      value={newIngName}
+                      onChange={e => setNewIngName(e.target.value)}
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Quantity"
+                      value={newIngQty}
+                      onChange={e => setNewIngQty(e.target.value)}
+                      className="sm:w-28 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <select
+                      value={newIngUnit}
+                      onChange={e => setNewIngUnit(e.target.value)}
+                      className="sm:w-24 bg-slate-800 border border-slate-700 rounded-lg px-2 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-orange-500 transition-colors"
+                    >
+                      <option value="kg">kg</option>
+                      <option value="g">g</option>
+                      <option value="litre">litre</option>
+                      <option value="ml">ml</option>
+                      <option value="pcs">pcs</option>
+                      <option value="packet">packet</option>
+                    </select>
+                    <button
+                      onClick={addIngredient}
+                      disabled={addingIngredient || !newIngName.trim()}
+                      className="flex items-center justify-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition-colors"
+                    >
+                      <Plus className="w-4 h-4" /> {addingIngredient ? 'Adding...' : 'Add'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search */}
+                <div className="relative mb-6">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Search ingredients..."
+                    value={ingSearch}
+                    onChange={e => setIngSearch(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+                  />
+                </div>
+
+                {ingredientsLoading ? (
+                  <div className="text-center py-20 text-slate-500">
+                    <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                    Loading ingredients...
+                  </div>
+                ) : filteredIngredients.length === 0 ? (
+                  <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                    <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                    <p className="text-slate-400">
+                      {ingredients.length === 0 ? 'Abhi tak koi ingredient add nahi hua. Upar se add karo.' : 'Koi ingredient nahi mila.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden divide-y divide-slate-800">
+                    {filteredIngredients.map(ing => {
+                      const qty = ing.quantity ?? 0
+                      const threshold = ing.low_stock_threshold ?? 5
+                      const isOut = qty <= 0
+                      const isLow = !isOut && qty <= threshold
+                      return (
+                        <div key={ing.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3.5">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-200 truncate">{ing.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <p className="text-xs text-slate-500">{qty} {ing.unit}</p>
+                              {isOut && (
+                                <span className="flex items-center gap-1 text-[10px] font-semibold text-red-400 bg-red-900/30 border border-red-800/50 px-1.5 py-0.5 rounded">
+                                  <AlertTriangle className="w-3 h-3" /> Khatam
+                                </span>
+                              )}
+                              {isLow && (
+                                <span className="text-[10px] font-semibold text-amber-400 bg-amber-900/30 border border-amber-800/50 px-1.5 py-0.5 rounded">
+                                  Kam bacha
+                                </span>
+                              )}
                             </div>
                           </div>
-                        )
-                      })}
-                    </div>
+
+                          <div className="flex items-center gap-3 shrink-0 sm:ml-3">
+                            {/* Quantity stepper */}
+                            <div className="flex items-center gap-1 bg-slate-800/70 border border-slate-700 rounded-lg px-1">
+                              <button
+                                onClick={() => updateIngredientQty(ing.id, qty - 1)}
+                                disabled={updatingIngId === ing.id || qty <= 0}
+                                className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <Minus className="w-3.5 h-3.5" />
+                              </button>
+                              <input
+                                type="number"
+                                value={qty}
+                                onChange={e => setIngredients(prev => prev.map(i => i.id === ing.id ? { ...i, quantity: Number(e.target.value) } : i))}
+                                onBlur={e => updateIngredientQty(ing.id, Number(e.target.value))}
+                                className="w-14 bg-transparent text-center text-sm font-semibold text-slate-200 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                              <button
+                                onClick={() => updateIngredientQty(ing.id, qty + 1)}
+                                disabled={updatingIngId === ing.id}
+                                className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                              >
+                                <Plus className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Delete */}
+                            <button
+                              onClick={() => deleteIngredient(ing.id)}
+                              disabled={deletingIngId === ing.id}
+                              className="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -2384,6 +2708,49 @@ export default function AdminDashboard() {
       )}
 
       </div>
+
+      {/* ── MASTER ON/OFF CONFIRM MODAL ─────────────────────────────────────── */}
+      {masterToggleConfirm && (
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-80 shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${masterToggleConfirm === 'off' ? 'bg-red-500/10 border border-red-500/20' : 'bg-emerald-500/10 border border-emerald-500/20'}`}>
+                {masterToggleConfirm === 'off'
+                  ? <XCircle className="w-5 h-5 text-red-400" />
+                  : <CheckCircle className="w-5 h-5 text-emerald-400" />}
+              </div>
+              <div>
+                <p className="text-white font-bold text-sm">
+                  {masterToggleConfirm === 'off' ? 'Turn OFF entire menu?' : 'Turn ON entire menu?'}
+                </p>
+                <p className="text-slate-400 text-xs">{menuItems.length} items affected</p>
+              </div>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-slate-300 text-sm mb-5">
+                {masterToggleConfirm === 'off'
+                  ? 'Ye sabhi menu items ko customers se turant hide kar dega — jaise restaurant band ho gaya ho.'
+                  : 'Ye sabhi menu items ko wapas available kar dega — chahe pehle kisi item ko manually off kiya tha (jaise out of stock).'}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setMasterToggleConfirm(null)}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-700 text-slate-300 text-sm font-semibold hover:bg-slate-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => bulkSetAvailability(masterToggleConfirm === 'on')}
+                  disabled={masterToggling}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition-colors disabled:opacity-60 ${masterToggleConfirm === 'off' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'}`}
+                >
+                  {masterToggling ? 'Please wait...' : masterToggleConfirm === 'off' ? 'Turn OFF All' : 'Turn ON All'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── PRINT CONFIRM MODAL ─────────────────────────────────────────────── */}
       {printConfirm && (
