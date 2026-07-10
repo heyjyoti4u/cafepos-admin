@@ -8,7 +8,7 @@ export default function OneSignalInit() {
       // Check for window to ensure it runs only on client
       if (typeof window !== 'undefined') {
         await OneSignal.init({
-          appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID || "TUMHARA_ONESIGNAL_APP_ID_YAHAN_DAALO",
+          appId: process.env.NEXT_PUBLIC_ONESIGNAL_APP_ID || "du45msxtee7redtf5b5acbmmz",
           allowLocalhostAsSecureOrigin: true,
         });
         
