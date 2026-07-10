@@ -1,3 +1,4 @@
+import OneSignalInit from '@/components/onesignal-init';
 import type { Metadata, Viewport } from "next"; 
 import { Inter } from "next/font/google";
 import "./globals.css";
