@@ -72,6 +72,7 @@ export default function AdminDashboard() {
   // PWA install prompt — captured from browser's beforeinstallprompt event
   const [installPrompt, setInstallPrompt]     = useState<any>(null)
   const [showInstallBanner, setShowInstallBanner] = useState(false)
+  const [mobileMoreOpen, setMobileMoreOpen]   = useState(false)
   const router        = useRouter()
 
   // ── Menu Control State ────────────────────────────────────────────────────
@@ -1064,34 +1065,34 @@ export default function AdminDashboard() {
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
 
-      {/* ── MOBILE OVERLAY ───────────────────────────────────────────────────── */}
+      {/* ── MOBILE OVERLAY (sidebar backdrop) ───────────────────────────────── */}
       {sidebarOpen && (
         <div className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm" onClick={() => setSidebarOpen(false)} />
       )}
 
-      {/* ── SIDEBAR (Sufra-style: collapsible on desktop, slide-in on mobile) ── */}
+      {/* ── SIDEBAR — desktop only (hidden on mobile, bottom nav used instead) ── */}
       <aside className={`
-        fixed top-0 left-0 h-full z-50 flex flex-col bg-slate-900 border-r border-slate-800
+        hidden md:flex flex-col bg-slate-900 border-r border-slate-800
         transition-all duration-300 ease-in-out overflow-hidden shrink-0
-        md:sticky md:z-auto
-        ${sidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full md:w-16 md:translate-x-0'}
+        sticky top-0 h-screen z-auto
+        ${sidebarOpen ? 'w-64' : 'w-16'}
       `}>
-        {/* Inner — always 256px wide, outer clips it */}
-        <div className="w-64 flex flex-col h-full">
+        <div className={`flex flex-col h-full ${sidebarOpen ? 'w-64' : 'w-16'} transition-all duration-300`}>
 
           {/* Logo */}
-          <div className="flex items-center gap-3 px-4 py-5 border-b border-slate-800 shrink-0">
+          <div className="flex items-center gap-3 px-3 py-4 border-b border-slate-800 shrink-0 overflow-hidden">
             <span className="bg-orange-600 p-2 rounded-lg shrink-0"><ChefHat className="w-5 h-5 text-white" /></span>
-            <span className="text-lg font-bold text-white whitespace-nowrap">Admin POS</span>
+            {sidebarOpen && <span className="text-base font-bold text-white whitespace-nowrap">Admin POS</span>}
           </div>
 
           {/* Nav */}
-          <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+          <nav className="flex-1 overflow-y-auto px-2 py-3 space-y-1">
             {NAV.map(({ key, Icon, label, badge, highlight }) => (
               <button
                 key={key}
-                onClick={() => { setActiveTab(key); if (window.innerWidth < 768) setSidebarOpen(false) }}
-                className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl font-medium text-sm transition-all whitespace-nowrap ${
+                onClick={() => setActiveTab(key)}
+                title={!sidebarOpen ? label : undefined}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition-all ${
                   activeTab === key
                     ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/20'
                     : highlight
@@ -1107,8 +1108,8 @@ export default function AdminDashboard() {
                     </span>
                   )}
                 </div>
-                <span className="flex-1 text-left">{label}</span>
-                {badge != null && badge > 0 && (
+                {sidebarOpen && <span className="flex-1 text-left truncate">{label}</span>}
+                {sidebarOpen && badge != null && badge > 0 && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${activeTab === key ? 'bg-white/20' : 'bg-red-500/20 text-red-400'}`}>
                     {badge}
                   </span>
@@ -1118,19 +1119,19 @@ export default function AdminDashboard() {
           </nav>
 
           {/* Logout */}
-          <div className="px-3 py-4 border-t border-slate-800 shrink-0">
+          <div className="px-2 py-3 border-t border-slate-800 shrink-0">
             <button
               onClick={async () => {
-                setSidebarOpen(false)
                 if (window.confirm('Logout from POS terminal?')) {
                   await supabase.auth.signOut()
                   router.replace('/')
                 }
               }}
-              className="w-full flex items-center gap-3.5 px-4 py-3 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all text-sm font-medium whitespace-nowrap"
+              title={!sidebarOpen ? 'Logout' : undefined}
+              className="w-full flex items-center gap-3 px-3 py-2.5 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all text-sm font-medium"
             >
               <LogOut className="w-5 h-5 shrink-0" />
-              <span>Logout</span>
+              {sidebarOpen && <span>Logout</span>}
             </button>
           </div>
         </div>
@@ -1139,36 +1140,49 @@ export default function AdminDashboard() {
       {/* ── MAIN BODY ─────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
-        {/* Topbar — always visible, hamburger toggles sidebar */}
+        {/* Topbar */}
         <header className="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-3 shrink-0">
+          {/* Hamburger — desktop only (mobile uses bottom nav) */}
           <button
             onClick={() => setSidebarOpen(prev => !prev)}
-            className="relative p-2 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors shrink-0"
+            className="relative p-2 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-white transition-colors shrink-0 hidden md:flex"
           >
             <Menu className="w-5 h-5" />
-            {newRequests.length > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center">
-                {newRequests.length > 9 ? '9+' : newRequests.length}
-              </span>
-            )}
           </button>
-          <h1 className="text-sm font-semibold text-slate-200 flex-1">
+
+          {/* Mobile: brand name */}
+          <span className="text-sm font-bold text-white md:hidden">TopBoy POS</span>
+
+          <h1 className="text-sm font-semibold text-slate-400 flex-1 hidden md:block">
             {NAV.find(n => n.key === activeTab)?.label ?? 'Dashboard'}
           </h1>
 
-          {/* PWA Install Button — appears whenever browser says app is installable */}
-          {showInstallBanner && installPrompt && (
-            <button
-              onClick={handleInstallClick}
-              className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-colors shrink-0"
-            >
-              <Download className="w-3.5 h-3.5" />
-              Install App
-            </button>
-          )}
+          <div className="flex items-center gap-2 ml-auto">
+            {/* New request badge — mobile topbar shortcut */}
+            {newRequests.length > 0 && (
+              <button
+                onClick={() => setActiveTab('new_requests')}
+                className="md:hidden flex items-center gap-1.5 bg-red-500/20 text-red-400 border border-red-500/30 text-xs font-bold px-2.5 py-1.5 rounded-xl animate-pulse"
+              >
+                <Bell className="w-3.5 h-3.5" />
+                {newRequests.length} New
+              </button>
+            )}
+            {/* PWA Install Button */}
+            {showInstallBanner && installPrompt && (
+              <button
+                onClick={handleInstallClick}
+                className="flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl transition-colors shrink-0"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Install App</span>
+                <span className="sm:hidden">Install</span>
+              </button>
+            )}
+          </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto p-3 md:p-8 pb-24 md:pb-8">
 
         {/* ── TAB: NEW REQUESTS ── */}
         {activeTab === 'new_requests' && (
@@ -2945,6 +2959,85 @@ export default function AdminDashboard() {
           </div>
         </div>
         </>
+      )}
+
+      {/* ── MOBILE BOTTOM NAV — visible only on small screens ──────────────── */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-30 bg-slate-900 border-t border-slate-800 flex items-stretch">
+        {[
+          { key: 'new_requests', Icon: Bell,           label: 'Requests', badge: newRequests.length,     highlight: newRequests.length > 0 },
+          { key: 'live_orders',  Icon: ChefHat,        label: 'Kitchen',  badge: kitchenActive.length,   highlight: false },
+          { key: 'tables_board', Icon: Armchair,       label: 'Tables',   badge: occupiedCount,          highlight: false },
+          { key: 'payments',     Icon: Receipt,        label: 'Payments', badge: unpaidBillGroups.length,highlight: false },
+          { key: '_more',        Icon: LayoutDashboard,label: 'More',     badge: 0,                      highlight: false },
+        ].map(({ key, Icon, label, badge, highlight }) => {
+          const isMore   = key === '_more'
+          const isActive = isMore
+            ? mobileMoreOpen
+            : (activeTab === key && !mobileMoreOpen)
+          return (
+            <button
+              key={key}
+              onClick={() => {
+                if (isMore) { setMobileMoreOpen(v => !v); return }
+                setActiveTab(key); setMobileMoreOpen(false)
+              }}
+              className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 relative transition-colors ${
+                isActive ? 'text-orange-400' : highlight ? 'text-sky-400' : 'text-slate-500'
+              }`}
+            >
+              {isActive && <span className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-orange-400 rounded-full" />}
+              <div className="relative">
+                <Icon className="w-5 h-5" />
+                {badge > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[8px] font-black rounded-full w-3.5 h-3.5 flex items-center justify-center">
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-semibold">{label}</span>
+            </button>
+          )
+        })}
+      </nav>
+
+      {/* ── MOBILE "MORE" SHEET ───────────────────────────────────────────────── */}
+      {mobileMoreOpen && (
+        <div className="md:hidden fixed inset-0 z-40 flex flex-col justify-end" onClick={() => setMobileMoreOpen(false)}>
+          <div className="bg-slate-900 border-t border-slate-800 rounded-t-2xl p-4 pb-28" onClick={e => e.stopPropagation()}>
+            <div className="w-10 h-1 bg-slate-700 rounded-full mx-auto mb-4" />
+            <div className="grid grid-cols-3 gap-3">
+              {NAV.filter(n => !['new_requests','live_orders','tables_board','payments'].includes(n.key)).map(({ key, Icon, label, badge }) => (
+                <button
+                  key={key}
+                  onClick={() => { setActiveTab(key); setMobileMoreOpen(false) }}
+                  className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
+                    activeTab === key
+                      ? 'bg-orange-600/20 border-orange-500/40 text-orange-400'
+                      : 'bg-slate-800 border-slate-700 text-slate-400 active:bg-slate-700'
+                  }`}
+                >
+                  <div className="relative">
+                    <Icon className="w-6 h-6" />
+                    {badge != null && badge > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[8px] font-black rounded-full w-3.5 h-3.5 flex items-center justify-center">{badge}</span>
+                    )}
+                  </div>
+                  <span className="text-xs font-semibold">{label}</span>
+                </button>
+              ))}
+              <button
+                onClick={async () => {
+                  setMobileMoreOpen(false)
+                  if (window.confirm('Logout?')) { await supabase.auth.signOut(); router.replace('/') }
+                }}
+                className="flex flex-col items-center gap-2 p-3 rounded-2xl border bg-slate-800 border-slate-700 text-red-400 active:bg-slate-700"
+              >
+                <LogOut className="w-6 h-6" />
+                <span className="text-xs font-semibold">Logout</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
