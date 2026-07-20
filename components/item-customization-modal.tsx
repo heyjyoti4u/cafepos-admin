@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { X } from "lucide-react";
-import { MenuItem, AddOn } from "@/lib/cart-context";
+import { MenuItem, AddOn, Variant } from "@/lib/cart-context";
 
 interface ItemCustomizationModalProps {
   item: MenuItem;
   onClose: () => void;
-  onAddToCart: (item: MenuItem, quantity: number, addOns: AddOn[], cookingPreference?: string) => void;
+  onAddToCart: (item: MenuItem, quantity: number, addOns: AddOn[], cookingPreference?: string, variant?: Variant) => void;
 }
 
 const COOKING_PREFS = [
@@ -26,9 +26,14 @@ export function ItemCustomizationModal({ item, onClose, onAddToCart }: ItemCusto
   const description  = (item as any).description as string | undefined;
   const imageUrl     = (item as any).image_url  as string | undefined;
   const rawAddons    = ((item as any).add_ons   as AddOn[] | undefined) ?? [];
+  const rawVariants  = ((item as any).variants  as Variant[] | undefined) ?? [];
 
+  // If the item has portion sizes (e.g. Half/Full for Biryani), default to the first one
+  const [selectedVariant, setSelectedVariant] = useState<Variant | null>(rawVariants[0] ?? null);
+
+  const basePrice  = rawVariants.length > 0 ? (selectedVariant?.price ?? item.price) : item.price;
   const addonPrice = selectedAddon?.price ?? 0;
-  const livePrice  = (item.price + addonPrice) * quantity;
+  const livePrice  = (basePrice + addonPrice) * quantity;
   const activePref = COOKING_PREFS.find(p => p.key === cookingPref)!;
 
   const handleAdd = () => {
@@ -37,6 +42,7 @@ export function ItemCustomizationModal({ item, onClose, onAddToCart }: ItemCusto
       quantity,
       selectedAddon ? [selectedAddon] : [],
       cookingPref !== "regular" ? activePref.label : undefined,
+      selectedVariant ?? undefined,
     );
     onClose();
   };
@@ -68,7 +74,7 @@ export function ItemCustomizationModal({ item, onClose, onAddToCart }: ItemCusto
               </div>
               <h2 className="text-xl font-bold text-slate-900 leading-tight">{item.name}</h2>
             </div>
-            <p className="text-base font-bold text-slate-600">₹{item.price}</p>
+            <p className="text-base font-bold text-slate-600">₹{basePrice}</p>
           </div>
           <button
             onClick={onClose}
@@ -96,6 +102,50 @@ export function ItemCustomizationModal({ item, onClose, onAddToCart }: ItemCusto
           {description && (
             <div className="mx-5 mb-5 p-4 bg-amber-50 rounded-2xl border border-amber-100">
               <p className="text-sm text-slate-600 leading-relaxed">{description}</p>
+            </div>
+          )}
+
+          {/* Portion Size (e.g. Half / Full — Biryani, Paneer Butter Masala etc.) */}
+          {rawVariants.length > 0 && (
+            <div className="px-5 mb-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-bold text-slate-800">Portion Size</h3>
+                <span className="text-xs bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full font-medium">
+                  Required
+                </span>
+              </div>
+              <div className="space-y-2">
+                {rawVariants.map((variant, i) => {
+                  const active = selectedVariant?.name === variant.name;
+                  return (
+                    <label
+                      key={i}
+                      className={`flex items-center gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
+                        active
+                          ? "border-orange-500 bg-orange-50"
+                          : "border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${
+                          active ? "border-orange-500" : "border-slate-300"
+                        }`}
+                      >
+                        {active && <div className="w-2.5 h-2.5 rounded-full bg-orange-500" />}
+                      </div>
+                      <span className="flex-1 text-sm font-semibold text-slate-800">{variant.name}</span>
+                      <span className="text-sm text-slate-500 font-medium">₹{variant.price}</span>
+                      <input
+                        type="radio"
+                        name="variant"
+                        className="sr-only"
+                        checked={active}
+                        onChange={() => setSelectedVariant(variant)}
+                      />
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -244,7 +294,7 @@ export function ItemCustomizationModal({ item, onClose, onAddToCart }: ItemCusto
           >
             <span className="text-left">
               <span className="block text-xs font-medium text-orange-200 mb-0.5">
-                {activePref.emoji} {activePref.label}
+                {selectedVariant ? `${selectedVariant.name} · ` : ""}{activePref.emoji} {activePref.label}
                 {selectedAddon ? ` · ${selectedAddon.name}` : ""}
               </span>
               <span className="block text-base font-bold">

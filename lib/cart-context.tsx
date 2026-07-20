@@ -8,6 +8,12 @@ export interface AddOn {
   price: number;
 }
 
+// Portion / quantity variant, e.g. Half / Full plate for Biryani, Paneer Butter Masala etc.
+export interface Variant {
+  name: string;
+  price: number;
+}
+
 export interface MenuItem {
   id: string;
   name: string;
@@ -15,6 +21,7 @@ export interface MenuItem {
   category?: string;
   image_url?: string;
   isVeg?: boolean;
+  variants?: Variant[]; // optional portion sizes, read from menu_items.variants (jsonb)
 }
 
 export interface CartItem extends MenuItem {
@@ -22,6 +29,7 @@ export interface CartItem extends MenuItem {
   quantity: number;
   addOns?: AddOn[];
   instructions?: string;
+  selectedVariant?: Variant;
 }
 
 export interface Order {

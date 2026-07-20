@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { MenuItem, useCart, AddOn } from "@/lib/cart-context";
+import { MenuItem, useCart, AddOn, Variant } from "@/lib/cart-context";
 import { ItemCustomizationModal } from "./item-customization-modal";
 
 interface AddToCartButtonProps {
@@ -16,9 +16,15 @@ export function AddToCartButton({ item }: AddToCartButtonProps) {
   const cartItem = items.find((i) => i.id === item.id);
   const quantity = cartItem?.quantity || 0;
 
-  const handleModalAdd = (item: MenuItem, qty: number, addOns: AddOn[], cookingPreference?: string) => {
+  const handleModalAdd = (item: MenuItem, qty: number, addOns: AddOn[], cookingPreference?: string, variant?: Variant) => {
     for (let i = 0; i < qty; i++) {
-      addItem({ ...item, addOns, instructions: cookingPreference });
+      addItem({
+        ...item,
+        price: variant?.price ?? item.price, // portion-priced item (e.g. Half/Full)
+        addOns,
+        instructions: cookingPreference,
+        selectedVariant: variant,
+      });
     }
   };
 

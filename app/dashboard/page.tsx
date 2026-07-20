@@ -14,6 +14,8 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { ItemCustomizationModal } from '@/components/item-customization-modal'
+import type { AddOn, Variant } from '@/lib/cart-context'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts'
 
 // Preparation badge styles
@@ -80,8 +82,9 @@ export default function AdminDashboard() {
   const [twPhone, setTwPhone]                 = useState('')
   const [twPickup, setTwPickup]               = useState('')
   const [twNotes, setTwNotes]                 = useState('')
-  const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number }[]>([])
+  const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number; addOns?: AddOn[]; variant?: string; cookingPreference?: string }[]>([])
   const [twSaving, setTwSaving]               = useState(false)
+  const [twActiveItem, setTwActiveItem]       = useState<any | null>(null) // menu item currently open in the customization modal
   // ── Staff ─────────────────────────────────────────────────────────────────
   const [staffList, setStaffList]             = useState<any[]>([])
   const [showStaffForm, setShowStaffForm]     = useState(false)
@@ -313,6 +316,23 @@ export default function AdminDashboard() {
       .not('status', 'in', '("done","cancelled")')
       .order('created_at', { ascending: false })
     if (data) setTakeawayOrders(data)
+  }
+
+  // Called when staff finishes customizing an item (portion size, add-ons, cooking pref) for a takeaway order
+  const handleTakeawayCustomizedAdd = (
+    item: any,
+    qty: number,
+    addOns: AddOn[],
+    cookingPreference?: string,
+    variant?: Variant,
+  ) => {
+    const unitPrice = (variant?.price ?? item.price) + addOns.reduce((s, a) => s + a.price, 0)
+    const displayName = `${item.name}${variant ? ` (${variant.name})` : ''}`
+    setTwItems(prev => [
+      ...prev,
+      { name: displayName, price: unitPrice, qty, addOns, variant: variant?.name, cookingPreference },
+    ])
+    setTwActiveItem(null)
   }
 
   const saveTakeawayOrder = async () => {
@@ -2735,30 +2755,29 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Item picker from menu */}
+              {/* Item picker from menu — opens the full customization modal (portion size / add-ons / cooking preference) */}
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Add Items from Menu *</label>
                 <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
                   {menuItems.length === 0 && <p className="text-slate-500 text-xs text-center py-3">Loading menu…</p>}
                   {menuItems.map((mi: any) => {
-                    const existing = twItems.find(i => i.name === mi.name)
+                    const hasVariants = Array.isArray(mi.variants) && mi.variants.length > 0
+                    const hasAddons   = Array.isArray(mi.add_ons) && mi.add_ons.length > 0
                     return (
                       <div key={mi.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-700 transition-colors">
                         <div>
                           <p className="text-sm text-white font-medium">{mi.name}</p>
-                          <p className="text-xs text-slate-400">₹{mi.price}</p>
+                          <p className="text-xs text-slate-400">
+                            {hasVariants ? `From ₹${Math.min(...mi.variants.map((v: any) => v.price))}` : `₹${mi.price}`}
+                            {(hasVariants || hasAddons) && <span className="text-slate-600"> · customizable</span>}
+                          </p>
                         </div>
-                        <div className="flex items-center gap-2">
-                          {existing ? (
-                            <>
-                              <button onClick={() => setTwItems(prev => prev.map(i => i.name === mi.name ? { ...i, qty: Math.max(0, i.qty - 1) } : i).filter(i => i.qty > 0))} className="w-6 h-6 bg-slate-600 rounded-full text-white flex items-center justify-center text-sm">−</button>
-                              <span className="text-white font-bold text-sm w-4 text-center">{existing.qty}</span>
-                              <button onClick={() => setTwItems(prev => prev.map(i => i.name === mi.name ? { ...i, qty: i.qty + 1 } : i))} className="w-6 h-6 bg-orange-600 rounded-full text-white flex items-center justify-center text-sm">+</button>
-                            </>
-                          ) : (
-                            <button onClick={() => setTwItems(prev => [...prev, { name: mi.name, price: mi.price, qty: 1 }])} className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded-lg font-bold transition-colors">Add</button>
-                          )}
-                        </div>
+                        <button
+                          onClick={() => setTwActiveItem(mi)}
+                          className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded-lg font-bold transition-colors"
+                        >
+                          Add
+                        </button>
                       </div>
                     )
                   })}
@@ -2767,12 +2786,26 @@ export default function AdminDashboard() {
 
               {/* Order summary */}
               {twItems.length > 0 && (
-                <div className="bg-slate-800 rounded-xl p-3 space-y-1">
-                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Order Summary</p>
+                <div className="bg-slate-800 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Order Summary</p>
                   {twItems.map((item, i) => (
-                    <div key={i} className="flex justify-between text-sm">
-                      <span className="text-slate-300">{item.qty}× {item.name}</span>
-                      <span className="text-slate-400">₹{item.price * item.qty}</span>
+                    <div key={i} className="flex items-start justify-between text-sm gap-2 pb-2 border-b border-slate-700/60 last:border-b-0 last:pb-0">
+                      <div className="min-w-0">
+                        <p className="text-slate-200 font-medium truncate">{item.name}</p>
+                        {(item.addOns?.length || item.cookingPreference) && (
+                          <p className="text-xs text-slate-500 truncate">
+                            {item.cookingPreference ? item.cookingPreference : ''}
+                            {item.addOns?.length ? `${item.cookingPreference ? ' · ' : ''}+ ${item.addOns.map(a => a.name).join(', ')}` : ''}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-1">
+                          <button onClick={() => setTwItems(prev => prev.map((it, idx) => idx === i ? { ...it, qty: Math.max(1, it.qty - 1) } : it))} className="w-5 h-5 bg-slate-600 rounded-full text-white flex items-center justify-center text-xs">−</button>
+                          <span className="text-white text-xs font-bold w-4 text-center">{item.qty}</span>
+                          <button onClick={() => setTwItems(prev => prev.map((it, idx) => idx === i ? { ...it, qty: it.qty + 1 } : it))} className="w-5 h-5 bg-orange-600 rounded-full text-white flex items-center justify-center text-xs">+</button>
+                          <button onClick={() => setTwItems(prev => prev.filter((_, idx) => idx !== i))} className="text-xs text-red-400 hover:text-red-300 ml-1">Remove</button>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 shrink-0">₹{item.price * item.qty}</span>
                     </div>
                   ))}
                   <div className="border-t border-slate-700 pt-2 mt-2 flex justify-between font-bold">
@@ -2780,6 +2813,14 @@ export default function AdminDashboard() {
                     <span className="text-orange-400">₹{twItems.reduce((s, i) => s + i.price * i.qty, 0)}</span>
                   </div>
                 </div>
+              )}
+
+              {twActiveItem && (
+                <ItemCustomizationModal
+                  item={twActiveItem}
+                  onClose={() => setTwActiveItem(null)}
+                  onAddToCart={handleTakeawayCustomizedAdd}
+                />
               )}
             </div>
             <div className="px-5 py-4 border-t border-slate-800 shrink-0">
