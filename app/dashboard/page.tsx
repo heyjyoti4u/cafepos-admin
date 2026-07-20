@@ -223,7 +223,7 @@ export default function AdminDashboard() {
       .from('orders')
       .select(`*, order_items (*)`)
       .order('created_at', { ascending: false })
-    if (error) { console.error('❌ Fetch error:', error); setLoading(false); return }
+    if (error) { console.error('✗ Fetch error:', error); setLoading(false); return }
     if (data) {
       setOrders(data)
       // Wrap in try-catch — dinning_tables table may not exist in all deployments
@@ -253,7 +253,7 @@ export default function AdminDashboard() {
       .update({ is_available: newValue })
       .eq('id', id)
     if (error) {
-      console.error('❌ Toggle error:', error)
+      console.error('✗ Toggle error:', error)
       setMenuItems(prev => prev.map(i => i.id === id ? { ...i, is_available: !newValue } : i))
     }
     setTogglingId(null)
@@ -270,7 +270,7 @@ export default function AdminDashboard() {
       .update({ stock_quantity: newQty })
       .eq('id', id)
     if (error) {
-      console.error('❌ Stock update error:', error)
+      console.error('✗ Stock update error:', error)
       setMenuItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: prevQty } : i))
     }
     setUpdatingStock(null)
@@ -286,7 +286,7 @@ export default function AdminDashboard() {
       .update({ is_available: value })
       .not('id', 'is', null) // matches every row
     if (error) {
-      console.error('❌ Bulk toggle error:', error)
+      console.error('✗ Bulk toggle error:', error)
       setMenuItems(prevSnapshot)
     }
     setMasterToggling(false)
@@ -372,7 +372,7 @@ export default function AdminDashboard() {
       .select()
       .single()
     if (error) {
-      console.error('❌ addIngredient error:', error)
+      console.error('✗ addIngredient error:', error)
       setAddingIngredient(false)
       return
     }
@@ -393,7 +393,7 @@ export default function AdminDashboard() {
       .update({ quantity: newQty })
       .eq('id', id)
     if (error) {
-      console.error('❌ updateIngredientQty error:', error)
+      console.error('✗ updateIngredientQty error:', error)
       setIngredients(prev => prev.map(i => i.id === id ? { ...i, quantity: prevQty } : i))
     }
     setUpdatingIngId(null)
@@ -408,7 +408,7 @@ export default function AdminDashboard() {
       .delete()
       .eq('id', id)
     if (error) {
-      console.error('❌ deleteIngredient error:', error)
+      console.error('✗ deleteIngredient error:', error)
       setIngredients(prevSnapshot)
     }
     setDeletingIngId(null)
@@ -499,14 +499,14 @@ export default function AdminDashboard() {
   const updateOrderStatus = async (orderId: string, newStatus: string) => {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o))
     const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId)
-    if (error) { console.error('❌ Update error:', error); fetchOrders() }
+    if (error) { console.error('✗ Update error:', error); fetchOrders() }
   }
 
   const markAsPaid = async (orderId: string) => {
     setUpdatingPayment(orderId)
     const { error } = await supabase.from('orders').update({ payment_status: 'paid' }).eq('id', orderId)
     if (!error) fetchOrders()
-    else console.error('❌ Payment update error:', error)
+    else console.error('✗ Payment update error:', error)
     setUpdatingPayment(null)
   }
 
@@ -901,7 +901,7 @@ export default function AdminDashboard() {
     setUpdatingPayment(orderIds[0])
     const { error } = await supabase.from('orders').update({ payment_status: 'paid' }).in('id', orderIds)
     if (!error) fetchOrders()
-    else console.error('❌ Group payment update error:', error)
+    else console.error('✗ Group payment update error:', error)
     setUpdatingPayment(null)
   }
 
