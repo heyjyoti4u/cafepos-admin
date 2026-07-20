@@ -27,12 +27,12 @@ const PREP_BADGE: Record<string, { label: string; emoji: string; cls: string }> 
 
 const handleSendWhatsApp = (order: any) => {
   if (!order.phone_number || order.phone_number.length < 10) {
-    alert("Is order mein valid phone number nahi hai bhai!");
+    alert("This order doesn't have a valid phone number!");
     return;
   }
 
-  // Tumhari admin app ka domain (jahan receipt host hogi)
-  // Local testing ke time ye http://localhost:3000 uthayega, Vercel pe asli domain.
+  // Your admin app's domain (where the receipt is hosted)
+  // During local testing this will pick up http://localhost:3000, on Vercel the real domain.
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const billLink = `${baseUrl}/receipt/${order.id}`;
 
@@ -47,7 +47,7 @@ const handleSendWhatsApp = (order: any) => {
   const encodedMessage = encodeURIComponent(message);
   const whatsappUrl = `https://api.whatsapp.com/send?phone=91${order.phone_number}&text=${encodedMessage}`;
 
-  // Naye tab mein WhatsApp open karega
+  // Opens WhatsApp in a new tab
   window.open(whatsappUrl, '_blank');
 };
 
@@ -1725,9 +1725,9 @@ export default function AdminDashboard() {
                           <span className="flex items-center gap-2"><Download className="w-4 h-4" /> Print Bill</span>
                         )}
                       </Button>
-                      {/* 🟢 NAYA WHATSAPP BILL BUTTON 🟢 */}
+                      {/* 🟢 NEW WHATSAPP BILL BUTTON 🟢 */}
                       {(() => {
-                        // Group ke first order se phone number nikal rahe hain
+                        // Get the phone number from the first order in the group
                         const orderWithPhone = orders.find(o => o.id === group.orderIds[0]);
                         if (orderWithPhone?.phone_number && orderWithPhone.phone_number.length >= 10) {
                           return (
@@ -1735,14 +1735,14 @@ export default function AdminDashboard() {
                               className="w-full bg-[#25D366] hover:bg-[#1DA851] text-white font-bold h-11 text-sm shadow-lg shadow-green-900/20"
                               onClick={() => handleSendWhatsApp({
                                 ...orderWithPhone,
-                                total_amount: group.totalAmount // Agar multiple orders merge hue hain toh total bhejo
+                                total_amount: group.totalAmount // If multiple orders are merged, send the combined total
                               })}
                             >
                               <span className="flex items-center gap-2">💬 Send WhatsApp Bill</span>
                             </Button>
                           );
                         }
-                        return null; // Agar phone number nahi hai toh button chup jayega
+                        return null; // Hide the button if there's no phone number
                       })()}
                       {/* Mark as Paid — triggers print confirm */}
                       <Button
@@ -1875,7 +1875,7 @@ export default function AdminDashboard() {
                   </thead>
                   <tbody>
                     {filteredHistoryOrders.length === 0 ? (
-                      <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500">Koi order nahi mila is period mein.</td></tr>
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500">No orders found in this period.</td></tr>
                     ) : filteredHistoryOrders.map(order => {
                       const isExpanded = expandedHistoryId === order.id
                       return (
@@ -2121,7 +2121,7 @@ export default function AdminDashboard() {
                 <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
                   {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
+                <p className="text-xs text-slate-500 mt-0.5">One switch to turn the entire menu ON or OFF</p>
               </div>
               <Switch
                 checked={allMenuAvailable}
@@ -2213,7 +2213,7 @@ export default function AdminDashboard() {
                 <p className="text-slate-500 text-sm mt-1">
                   {invView === 'menu'
                     ? 'Track stock quantity and switch items off when unavailable.'
-                    : 'Raw materials jaise sabziyan, masale — manually add aur manage karo.'}
+                    : 'Raw materials like vegetables, spices — add and manage manually.'}
                   {invView === 'menu' && outOfStockCount > 0 && (
                     <span className="ml-2 text-red-400 font-semibold">{outOfStockCount} out of stock</span>
                   )}
@@ -2221,10 +2221,10 @@ export default function AdminDashboard() {
                     <span className="ml-2 text-amber-400 font-semibold">{lowStockCount} low stock</span>
                   )}
                   {invView === 'ingredients' && outOfStockIngredientsCount > 0 && (
-                    <span className="ml-2 text-red-400 font-semibold">{outOfStockIngredientsCount} khatam</span>
+                    <span className="ml-2 text-red-400 font-semibold">{outOfStockIngredientsCount} out of stock</span>
                   )}
                   {invView === 'ingredients' && lowStockIngredientsCount > 0 && (
-                    <span className="ml-2 text-amber-400 font-semibold">{lowStockIngredientsCount} kam bacha</span>
+                    <span className="ml-2 text-amber-400 font-semibold">{lowStockIngredientsCount} low stock</span>
                   )}
                 </p>
               </div>
@@ -2260,7 +2260,7 @@ export default function AdminDashboard() {
                     <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
                       {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
+                    <p className="text-xs text-slate-500 mt-0.5">One switch to turn the entire menu ON or OFF</p>
                   </div>
                   <Switch
                     checked={allMenuAvailable}
@@ -2409,21 +2409,21 @@ export default function AdminDashboard() {
                   </div>
                   <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 text-center">
                     <p className="text-lg font-bold text-amber-400">{lowStockIngredientsCount}</p>
-                    <p className="text-xs text-slate-500">Kam Bacha</p>
+                    <p className="text-xs text-slate-500">Low Stock</p>
                   </div>
                   <div className="bg-slate-900 border border-red-900/40 rounded-xl p-3 text-center">
                     <p className="text-lg font-bold text-red-400">{outOfStockIngredientsCount}</p>
-                    <p className="text-xs text-slate-500">Khatam</p>
+                    <p className="text-xs text-slate-500">Out of Stock</p>
                   </div>
                 </div>
 
                 {/* Add new ingredient form */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6">
-                  <h3 className="text-sm font-bold text-slate-200 mb-3">Naya Ingredient Add Karo</h3>
+                  <h3 className="text-sm font-bold text-slate-200 mb-3">Add New Ingredient</h3>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
-                      placeholder="Naam (jaise Tomato, Onion, Paneer...)"
+                      placeholder="Name (e.g. Tomato, Onion, Paneer...)"
                       value={newIngName}
                       onChange={e => setNewIngName(e.target.value)}
                       className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
@@ -2478,7 +2478,7 @@ export default function AdminDashboard() {
                   <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
                     <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
                     <p className="text-slate-400">
-                      {ingredients.length === 0 ? 'Abhi tak koi ingredient add nahi hua. Upar se add karo.' : 'Koi ingredient nahi mila.'}
+                      {ingredients.length === 0 ? 'No ingredients added yet. Add one above.' : 'No ingredients found.'}
                     </p>
                   </div>
                 ) : (
@@ -2496,12 +2496,12 @@ export default function AdminDashboard() {
                               <p className="text-xs text-slate-500">{qty} {ing.unit}</p>
                               {isOut && (
                                 <span className="flex items-center gap-1 text-[10px] font-semibold text-red-400 bg-red-900/30 border border-red-800/50 px-1.5 py-0.5 rounded">
-                                  <AlertTriangle className="w-3 h-3" /> Khatam
+                                  <AlertTriangle className="w-3 h-3" /> Out of Stock
                                 </span>
                               )}
                               {isLow && (
                                 <span className="text-[10px] font-semibold text-amber-400 bg-amber-900/30 border border-amber-800/50 px-1.5 py-0.5 rounded">
-                                  Kam bacha
+                                  Low stock
                                 </span>
                               )}
                             </div>
@@ -3160,8 +3160,8 @@ export default function AdminDashboard() {
             <div className="px-5 py-4">
               <p className="text-slate-300 text-sm mb-5">
                 {masterToggleConfirm === 'off'
-                  ? 'Ye sabhi menu items ko customers se turant hide kar dega — jaise restaurant band ho gaya ho.'
-                  : 'Ye sabhi menu items ko wapas available kar dega — chahe pehle kisi item ko manually off kiya tha (jaise out of stock).'}
+                  ? 'This will instantly hide all menu items from customers — as if the restaurant is closed.'
+                  : 'This will make all menu items available again — even if some were manually turned off before (e.g. out of stock).'}
               </p>
               <div className="flex gap-2">
                 <button

@@ -8,10 +8,10 @@ export function CookieConsent() {
   const [isVisible, setIsVisible] = useState(false)
 
   useEffect(() => {
-    // Check karo ki kya user ne pehle se accept kiya hua hai
+    // Check whether the user has already accepted
     const hasConsented = localStorage.getItem('ff-cookie-consent')
     
-    // Agar accept nahi kiya hai, toh thodi der (1 second) baad popup dikhao
+    // If not accepted, show the popup after a short delay (1 second)
     if (!hasConsented) {
       const timer = setTimeout(() => {
         setIsVisible(true)
@@ -38,7 +38,7 @@ export function CookieConsent() {
           <div>
             <h3 className="text-white font-semibold mb-1">We value your privacy</h3>
             <p className="text-sm text-slate-400">
-              Hum aapke orders aur cart ko track karne ke liye cookies ka use karte hain taaki aapko seamless experience mile. 
+              We use cookies to track your orders and cart so you get a seamless experience. 
             </p>
           </div>
         </div>

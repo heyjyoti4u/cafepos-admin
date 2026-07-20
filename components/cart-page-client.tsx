@@ -73,11 +73,11 @@ export function CartPageClient({ tableId }: CartPageClientProps) {
         setOrderSuccess(true);
         setTimeout(() => router.push(`/table/${tableId}/orders`), 800);
       } else {
-        setOrderError(result.error || "Order place nahi ho saka. Dobara try karo.");
+        setOrderError(result.error || "Could not place the order. Please try again.");
         setIsOrdering(false);
       }
     } catch {
-      setOrderError("Network error. Internet check karo aur dobara try karo.");
+      setOrderError("Network error. Please check your internet and try again.");
       setIsOrdering(false);
     }
   };

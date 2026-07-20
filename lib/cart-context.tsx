@@ -25,7 +25,7 @@ export interface MenuItem {
 }
 
 export interface CartItem extends MenuItem {
-  cartItemId: string; // ✅ NAYA: Har cart item ka apna unique ID (Customizations alag rakhne ke liye)
+  cartItemId: string; // ✅ NEW: Each cart item gets its own unique ID (to keep customizations separate)
   quantity: number;
   addOns?: AddOn[];
   instructions?: string;
@@ -85,7 +85,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         .from("orders")
         .select("*, order_items(*)")
         .eq("session_id", sessionId)
-        .neq("payment_status", "paid") // ✅ NAYA: Paid orders customer ko mat dikhao
+        .neq("payment_status", "paid") // ✅ NEW: Don't show paid orders to the customer
         .order("created_at", { ascending: false });
 
       if (data && !error) {
@@ -100,7 +100,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
           paymentMethod: dbOrder.payment_method,
           createdAt: new Date(dbOrder.created_at),
           items: (dbOrder.order_items || []).map((item: any) => ({
-            id: item.item_id, // DB wala original item ID
+            id: item.item_id, // original item ID from the DB
             cartItemId: item.id,
             name: item.item_name,
             price: item.item_price,
@@ -133,7 +133,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   // ─── ✅ SMART ADD ITEM (Same item with different add-ons handled separately) ───
   const addItem = (item: MenuItem & { addOns?: AddOn[]; instructions?: string }) => {
     setItems((prev) => {
-      // Check karo kya EXACT same customization wala item cart mein already hai?
+      // Check whether an item with the EXACT same customization is already in the cart
       const existing = prev.find(
         (i) =>
           i.id === item.id &&
@@ -146,7 +146,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       }
       
       // Naya combination hai toh naya unique cartItemId do
-      // Date.now() ke saath random string add kar rahe hain taaki collision na ho
+      // Adding a random string alongside Date.now() to avoid collisions
       const cartItemId = `${item.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       return [...prev, { ...item, cartItemId, quantity: 1 }];
     });
@@ -255,7 +255,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       clearCart();
       return { success: true, orderId: orderData.id };
     } catch (error: any) {
-      return { success: false, error: error?.message || "Order place nahi ho saka. Dobara try karo." };
+      return { success: false, error: error?.message || "Could not place the order. Please try again." };
     }
   };
 
