@@ -73,6 +73,25 @@ export default function AdminDashboard() {
   const [installPrompt, setInstallPrompt]     = useState<any>(null)
   const [showInstallBanner, setShowInstallBanner] = useState(false)
   const [mobileMoreOpen, setMobileMoreOpen]   = useState(false)
+  // ── Takeaway ──────────────────────────────────────────────────────────────
+  const [takeawayOrders, setTakeawayOrders]   = useState<any[]>([])
+  const [showTakeawayForm, setShowTakeawayForm] = useState(false)
+  const [twCustomer, setTwCustomer]           = useState('')
+  const [twPhone, setTwPhone]                 = useState('')
+  const [twPickup, setTwPickup]               = useState('')
+  const [twNotes, setTwNotes]                 = useState('')
+  const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number }[]>([])
+  const [twSaving, setTwSaving]               = useState(false)
+  // ── Staff ─────────────────────────────────────────────────────────────────
+  const [staffList, setStaffList]             = useState<any[]>([])
+  const [showStaffForm, setShowStaffForm]     = useState(false)
+  const [sfName, setSfName]                   = useState('')
+  const [sfPhone, setSfPhone]                 = useState('')
+  const [sfRole, setSfRole]                   = useState('Waiter')
+  const [sfShiftStart, setSfShiftStart]       = useState('09:00')
+  const [sfShiftEnd, setSfShiftEnd]           = useState('18:00')
+  const [sfNotes, setSfNotes]                 = useState('')
+  const [sfSaving, setSfSaving]               = useState(false)
   const router        = useRouter()
 
   // ── Menu Control State ────────────────────────────────────────────────────
@@ -286,6 +305,59 @@ export default function AdminDashboard() {
     setIngredientsLoading(false)
   }
 
+  // ── Takeaway fetch + save ─────────────────────────────────────────────────
+  const fetchTakeawayOrders = async () => {
+    const { data } = await supabase
+      .from('takeaway_orders')
+      .select('*')
+      .not('status', 'in', '("done","cancelled")')
+      .order('created_at', { ascending: false })
+    if (data) setTakeawayOrders(data)
+  }
+
+  const saveTakeawayOrder = async () => {
+    if (!twCustomer.trim() || twItems.length === 0) return
+    setTwSaving(true)
+    const total = twItems.reduce((s, i) => s + i.price * i.qty, 0)
+    await supabase.from('takeaway_orders').insert({
+      customer_name: twCustomer.trim(),
+      phone: twPhone.trim(),
+      pickup_time: twPickup || 'ASAP',
+      notes: twNotes.trim(),
+      items: twItems,
+      total_amount: total,
+      status: 'new',
+    })
+    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes(''); setTwItems([])
+    setShowTakeawayForm(false)
+    setTwSaving(false)
+    fetchTakeawayOrders()
+  }
+
+  // ── Staff fetch + save ────────────────────────────────────────────────────
+  const fetchStaff = async () => {
+    const { data } = await supabase.from('staff').select('*').order('name')
+    if (data) setStaffList(data)
+  }
+
+  const saveStaffMember = async () => {
+    if (!sfName.trim()) return
+    setSfSaving(true)
+    await supabase.from('staff').insert({
+      name: sfName.trim(),
+      phone: sfPhone.trim(),
+      role: sfRole,
+      shift_start: sfShiftStart,
+      shift_end: sfShiftEnd,
+      notes: sfNotes.trim(),
+      present_today: false,
+    })
+    setSfName(''); setSfPhone(''); setSfRole('Waiter'); setSfShiftStart('09:00'); setSfShiftEnd('18:00'); setSfNotes('')
+    setShowStaffForm(false)
+    setSfSaving(false)
+    fetchStaff()
+  }
+
   const addIngredient = async () => {
     if (!newIngName.trim()) return
     setAddingIngredient(true)
@@ -392,6 +464,21 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (activeTab === 'inventory' && invView === 'ingredients' && ingredients.length === 0) fetchIngredients()
   }, [activeTab, invView])
+
+  // Fetch takeaway orders when tab opens
+  useEffect(() => {
+    if (activeTab === 'takeaway') fetchTakeawayOrders()
+  }, [activeTab])
+
+  // Fetch menu for takeaway form when it opens
+  useEffect(() => {
+    if (showTakeawayForm && menuItems.length === 0) fetchMenuItems()
+  }, [showTakeawayForm])
+
+  // Fetch staff when tab opens
+  useEffect(() => {
+    if (activeTab === 'staff') fetchStaff()
+  }, [activeTab])
 
   // ── Auto-delete declined orders from DB after 15s ────────────────────────
   useEffect(() => {
@@ -2446,27 +2533,316 @@ export default function AdminDashboard() {
         )}
 
         {/* ── TAB: TAKEAWAY ── */}
+        {/* ── TAB: TAKEAWAY ─────────────────────────────────────────────────── */}
         {activeTab === 'takeaway' && (
-          <div className="max-w-7xl mx-auto flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-20 h-20 bg-orange-600/10 border border-orange-500/20 rounded-3xl flex items-center justify-center mb-6">
-              <Package className="w-10 h-10 text-orange-500" />
+          <div className="max-w-5xl mx-auto">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 border-b border-slate-800 pb-4 gap-3">
+              <h1 className="text-xl md:text-3xl font-bold text-white flex items-center gap-3">
+                Takeaway Orders
+                <span className="bg-orange-600/20 text-orange-400 text-xs md:text-sm py-1 px-3 rounded-full border border-orange-500/20">
+                  {takeawayOrders.filter(o => o.status !== 'done' && o.status !== 'cancelled').length} Active
+                </span>
+              </h1>
+              <button
+                onClick={() => setShowTakeawayForm(true)}
+                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-4 py-2.5 rounded-xl text-sm transition-colors"
+              >
+                <Plus className="w-4 h-4" /> New Takeaway Order
+              </button>
             </div>
-            <h1 className="text-2xl md:text-3xl font-black text-white mb-3">Coming Soon</h1>
-            <p className="text-slate-500 text-sm max-w-xs">Takeaway order management is under development. Stay tuned!</p>
+
+            {/* Active takeaway orders */}
+            {takeawayOrders.length === 0 ? (
+              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                <Package className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-300 mb-2">No takeaway orders</h3>
+                <p className="text-slate-500 text-sm">Click "New Takeaway Order" to create one.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {takeawayOrders.map(order => {
+                  const statusConfig: Record<string, { label: string; color: string; next: string; nextLabel: string }> = {
+                    new:       { label: 'Received',   color: 'bg-sky-500/10 text-sky-400 border-sky-500/20',     next: 'preparing', nextLabel: 'Start Preparing' },
+                    preparing: { label: 'Preparing',  color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', next: 'ready',    nextLabel: 'Mark Ready' },
+                    ready:     { label: 'Ready',      color: 'bg-green-500/10 text-green-400 border-green-500/20', next: 'done',     nextLabel: 'Mark Picked Up' },
+                    done:      { label: 'Picked Up',  color: 'bg-slate-500/10 text-slate-400 border-slate-500/20', next: '',         nextLabel: '' },
+                    cancelled: { label: 'Cancelled',  color: 'bg-red-500/10 text-red-400 border-red-500/20',       next: '',         nextLabel: '' },
+                  }
+                  const cfg = statusConfig[order.status] ?? statusConfig.new
+                  return (
+                    <div key={order.id} className="bg-slate-900 rounded-2xl border border-slate-800 p-4">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div>
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <p className="font-bold text-white text-base">{order.customer_name}</p>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.color}`}>{cfg.label}</span>
+                          </div>
+                          <p className="text-xs text-slate-400">{order.phone} · Pickup: {order.pickup_time}</p>
+                          {order.notes && <p className="text-xs text-amber-400 mt-0.5 italic">📝 {order.notes}</p>}
+                        </div>
+                        <p className="text-orange-400 font-bold text-base shrink-0">₹{order.total_amount}</p>
+                      </div>
+                      <div className="space-y-1 mb-3 pl-1">
+                        {(order.items || []).map((item: any, i: number) => (
+                          <p key={i} className="text-xs text-slate-400">{item.qty}× {item.name} <span className="text-slate-600">₹{item.price * item.qty}</span></p>
+                        ))}
+                      </div>
+                      {cfg.next && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={async () => {
+                              await supabase.from('takeaway_orders').update({ status: cfg.next }).eq('id', order.id)
+                              fetchTakeawayOrders()
+                            }}
+                            className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm py-2 rounded-xl transition-colors"
+                          >
+                            {cfg.nextLabel}
+                          </button>
+                          <button
+                            onClick={async () => {
+                              await supabase.from('takeaway_orders').update({ status: 'cancelled' }).eq('id', order.id)
+                              fetchTakeawayOrders()
+                            }}
+                            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold text-sm py-2 px-4 rounded-xl border border-red-500/20 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
+        {/* ── TAB: STAFF ────────────────────────────────────────────────────── */}
         {activeTab === 'staff' && (
-          <div className="max-w-7xl mx-auto flex flex-col items-center justify-center py-24 text-center">
-            <div className="w-20 h-20 bg-orange-600/10 border border-orange-500/20 rounded-3xl flex items-center justify-center mb-6">
-              <Users className="w-10 h-10 text-orange-500" />
+          <div className="max-w-5xl mx-auto">
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 border-b border-slate-800 pb-4 gap-3">
+              <h1 className="text-xl md:text-3xl font-bold text-white">Staff Management</h1>
+              <button
+                onClick={() => setShowStaffForm(true)}
+                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-4 py-2.5 rounded-xl text-sm transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Add Staff Member
+              </button>
             </div>
-            <h1 className="text-2xl md:text-3xl font-black text-white mb-3">Coming Soon</h1>
-            <p className="text-slate-500 text-sm max-w-xs">Staff management is under development. Stay tuned!</p>
+
+            {/* Today's attendance summary */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              {[
+                { label: 'Total Staff', value: staffList.length,                                         color: 'text-white' },
+                { label: 'Present Today', value: staffList.filter(s => s.present_today).length,          color: 'text-green-400' },
+                { label: 'Absent Today',  value: staffList.filter(s => !s.present_today).length,         color: 'text-red-400' },
+              ].map(s => (
+                <div key={s.label} className="bg-slate-900 rounded-2xl border border-slate-800 p-4 text-center">
+                  <p className={`text-2xl font-black ${s.color}`}>{s.value}</p>
+                  <p className="text-xs text-slate-500 mt-1">{s.label}</p>
+                </div>
+              ))}
+            </div>
+
+            {staffList.length === 0 ? (
+              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
+                <Users className="w-12 h-12 text-slate-700 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-slate-300 mb-2">No staff members yet</h3>
+                <p className="text-slate-500 text-sm">Add your team members to track attendance and shifts.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {staffList.map(member => (
+                  <div key={member.id} className="bg-slate-900 rounded-2xl border border-slate-800 p-4">
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <p className="font-bold text-white">{member.name}</p>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            member.role === 'Chef'    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' :
+                            member.role === 'Manager' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
+                            member.role === 'Cashier' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                            'bg-slate-500/10 text-slate-400 border-slate-500/20'
+                          }`}>{member.role}</span>
+                        </div>
+                        <p className="text-xs text-slate-400">{member.phone}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Shift: {member.shift_start} – {member.shift_end}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {/* Present today toggle */}
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-[10px] text-slate-500">{member.present_today ? '✅ Present' : '❌ Absent'}</span>
+                          <Switch
+                            checked={member.present_today}
+                            onCheckedChange={async (val) => {
+                              await supabase.from('staff').update({ present_today: val }).eq('id', member.id)
+                              fetchStaff()
+                            }}
+                          />
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (!window.confirm(`Remove ${member.name} from staff?`)) return
+                            await supabase.from('staff').delete().eq('id', member.id)
+                            fetchStaff()
+                          }}
+                          className="p-2 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                    {member.notes && (
+                      <p className="text-xs text-slate-500 italic border-t border-slate-800 pt-2 mt-2">{member.notes}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
       </main>
+
+      {/* ── TAKEAWAY ORDER FORM MODAL ─────────────────────────────────────── */}
+      {showTakeawayForm && (
+        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowTakeawayForm(false)}>
+          <div className="bg-slate-900 w-full max-w-lg rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" style={{ maxHeight: '90dvh' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
+              <h2 className="text-lg font-bold text-white">New Takeaway Order</h2>
+              <button onClick={() => setShowTakeawayForm(false)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-5 space-y-4">
+              {/* Customer info */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Customer Name *</label>
+                  <input value={twCustomer} onChange={e => setTwCustomer(e.target.value)} placeholder="Name" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Phone</label>
+                  <input value={twPhone} onChange={e => setTwPhone(e.target.value)} placeholder="+91 XXXXX" type="tel" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Pickup Time</label>
+                  <input value={twPickup} onChange={e => setTwPickup(e.target.value)} placeholder="e.g. 7:30 PM / ASAP" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Notes</label>
+                  <input value={twNotes} onChange={e => setTwNotes(e.target.value)} placeholder="Special instructions" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                </div>
+              </div>
+
+              {/* Item picker from menu */}
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Add Items from Menu *</label>
+                <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
+                  {menuItems.length === 0 && <p className="text-slate-500 text-xs text-center py-3">Loading menu…</p>}
+                  {menuItems.map((mi: any) => {
+                    const existing = twItems.find(i => i.name === mi.name)
+                    return (
+                      <div key={mi.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-700 transition-colors">
+                        <div>
+                          <p className="text-sm text-white font-medium">{mi.name}</p>
+                          <p className="text-xs text-slate-400">₹{mi.price}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {existing ? (
+                            <>
+                              <button onClick={() => setTwItems(prev => prev.map(i => i.name === mi.name ? { ...i, qty: Math.max(0, i.qty - 1) } : i).filter(i => i.qty > 0))} className="w-6 h-6 bg-slate-600 rounded-full text-white flex items-center justify-center text-sm">−</button>
+                              <span className="text-white font-bold text-sm w-4 text-center">{existing.qty}</span>
+                              <button onClick={() => setTwItems(prev => prev.map(i => i.name === mi.name ? { ...i, qty: i.qty + 1 } : i))} className="w-6 h-6 bg-orange-600 rounded-full text-white flex items-center justify-center text-sm">+</button>
+                            </>
+                          ) : (
+                            <button onClick={() => setTwItems(prev => [...prev, { name: mi.name, price: mi.price, qty: 1 }])} className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded-lg font-bold transition-colors">Add</button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {/* Order summary */}
+              {twItems.length > 0 && (
+                <div className="bg-slate-800 rounded-xl p-3 space-y-1">
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Order Summary</p>
+                  {twItems.map((item, i) => (
+                    <div key={i} className="flex justify-between text-sm">
+                      <span className="text-slate-300">{item.qty}× {item.name}</span>
+                      <span className="text-slate-400">₹{item.price * item.qty}</span>
+                    </div>
+                  ))}
+                  <div className="border-t border-slate-700 pt-2 mt-2 flex justify-between font-bold">
+                    <span className="text-white">Total</span>
+                    <span className="text-orange-400">₹{twItems.reduce((s, i) => s + i.price * i.qty, 0)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-4 border-t border-slate-800 shrink-0">
+              <Button
+                disabled={!twCustomer.trim() || twItems.length === 0 || twSaving}
+                onClick={saveTakeawayOrder}
+                className="w-full bg-orange-600 hover:bg-orange-700 font-bold h-12 disabled:opacity-40"
+              >
+                {twSaving ? 'Placing Order…' : `Place Takeaway Order${twItems.length > 0 ? ` — ₹${twItems.reduce((s, i) => s + i.price * i.qty, 0)}` : ''}`}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STAFF FORM MODAL ──────────────────────────────────────────────── */}
+      {showStaffForm && (
+        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowStaffForm(false)}>
+          <div className="bg-slate-900 w-full max-w-md rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
+              <h2 className="text-lg font-bold text-white">Add Staff Member</h2>
+              <button onClick={() => setShowStaffForm(false)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Name *</label>
+                  <input value={sfName} onChange={e => setSfName(e.target.value)} placeholder="Full name" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Phone</label>
+                  <input value={sfPhone} onChange={e => setSfPhone(e.target.value)} placeholder="+91 XXXXX" type="tel" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Role</label>
+                <select value={sfRole} onChange={e => setSfRole(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500">
+                  {['Chef', 'Waiter', 'Cashier', 'Manager', 'Delivery', 'Cleaner'].map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Shift Start</label>
+                  <input type="time" value={sfShiftStart} onChange={e => setSfShiftStart(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Shift End</label>
+                  <input type="time" value={sfShiftEnd} onChange={e => setSfShiftEnd(e.target.value)} className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-orange-500" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Notes</label>
+                <input value={sfNotes} onChange={e => setSfNotes(e.target.value)} placeholder="e.g. Part-time, Weekend only" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+              </div>
+            </div>
+            <div className="px-5 py-4 border-t border-slate-800 shrink-0">
+              <Button disabled={!sfName.trim() || sfSaving} onClick={saveStaffMember} className="w-full bg-orange-600 hover:bg-orange-700 font-bold h-12 disabled:opacity-40">
+                {sfSaving ? 'Adding…' : 'Add Staff Member'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── ORDER EDIT MODAL ──────────────────────────────────────────────── */}
       {editingOrder && (
