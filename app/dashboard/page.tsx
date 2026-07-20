@@ -2671,7 +2671,7 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2">
                         {/* Present today toggle */}
                         <div className="flex flex-col items-center gap-1">
-                          <span className="text-[10px] text-slate-500">{member.present_today ? '✅ Present' : '❌ Absent'}</span>
+                          <span className="text-[10px] text-slate-500">{member.present_today ? '✓ Present' : '✗ Absent'}</span>
                           <Switch
                             checked={member.present_today}
                             onCheckedChange={async (val) => {
