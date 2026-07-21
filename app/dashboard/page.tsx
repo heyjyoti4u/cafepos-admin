@@ -14,8 +14,6 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { ItemCustomizationModal } from '@/components/item-customization-modal'
-import type { AddOn, Variant } from '@/lib/cart-context'
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts'
 
 // Preparation badge styles
@@ -27,12 +25,12 @@ const PREP_BADGE: Record<string, { label: string; emoji: string; cls: string }> 
 
 const handleSendWhatsApp = (order: any) => {
   if (!order.phone_number || order.phone_number.length < 10) {
-    alert("This order doesn't have a valid phone number!");
+    alert("Is order mein valid phone number nahi hai bhai!");
     return;
   }
 
-  // Your admin app's domain (where the receipt is hosted)
-  // During local testing this will pick up http://localhost:3000, on Vercel the real domain.
+  // Tumhari admin app ka domain (jahan receipt host hogi)
+  // Local testing ke time ye http://localhost:3000 uthayega, Vercel pe asli domain.
   const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const billLink = `${baseUrl}/receipt/${order.id}`;
 
@@ -47,7 +45,7 @@ const handleSendWhatsApp = (order: any) => {
   const encodedMessage = encodeURIComponent(message);
   const whatsappUrl = `https://api.whatsapp.com/send?phone=91${order.phone_number}&text=${encodedMessage}`;
 
-  // Opens WhatsApp in a new tab
+  // Naye tab mein WhatsApp open karega
   window.open(whatsappUrl, '_blank');
 };
 
@@ -82,9 +80,15 @@ export default function AdminDashboard() {
   const [twPhone, setTwPhone]                 = useState('')
   const [twPickup, setTwPickup]               = useState('')
   const [twNotes, setTwNotes]                 = useState('')
-  const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number; addOns?: AddOn[]; variant?: string; cookingPreference?: string }[]>([])
+  const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number; addons: string; variantLabel: string }[]>([])
   const [twSaving, setTwSaving]               = useState(false)
-  const [twActiveItem, setTwActiveItem]       = useState<any | null>(null) // menu item currently open in the customization modal
+  // Inline item configurator — which menu item is being configured right now
+  const [twPickingItem, setTwPickingItem]     = useState<any>(null)
+  const [twPickVariant, setTwPickVariant]     = useState<{ name: string; price: number } | null>(null)
+  const [twPickAddons, setTwPickAddons]       = useState<Set<string>>(new Set())
+  const [twPickQty, setTwPickQty]             = useState(1)
+  const [twMenuSearch, setTwMenuSearch]       = useState('')
+  const [twMenuCategory, setTwMenuCategory]   = useState('All')
   // ── Staff ─────────────────────────────────────────────────────────────────
   const [staffList, setStaffList]             = useState<any[]>([])
   const [showStaffForm, setShowStaffForm]     = useState(false)
@@ -226,7 +230,7 @@ export default function AdminDashboard() {
       .from('orders')
       .select(`*, order_items (*)`)
       .order('created_at', { ascending: false })
-    if (error) { console.error('✗ Fetch error:', error); setLoading(false); return }
+    if (error) { console.error('❌ Fetch error:', error); setLoading(false); return }
     if (data) {
       setOrders(data)
       // Wrap in try-catch — dinning_tables table may not exist in all deployments
@@ -256,7 +260,7 @@ export default function AdminDashboard() {
       .update({ is_available: newValue })
       .eq('id', id)
     if (error) {
-      console.error('✗ Toggle error:', error)
+      console.error('❌ Toggle error:', error)
       setMenuItems(prev => prev.map(i => i.id === id ? { ...i, is_available: !newValue } : i))
     }
     setTogglingId(null)
@@ -273,7 +277,7 @@ export default function AdminDashboard() {
       .update({ stock_quantity: newQty })
       .eq('id', id)
     if (error) {
-      console.error('✗ Stock update error:', error)
+      console.error('❌ Stock update error:', error)
       setMenuItems(prev => prev.map(i => i.id === id ? { ...i, stock_quantity: prevQty } : i))
     }
     setUpdatingStock(null)
@@ -289,7 +293,7 @@ export default function AdminDashboard() {
       .update({ is_available: value })
       .not('id', 'is', null) // matches every row
     if (error) {
-      console.error('✗ Bulk toggle error:', error)
+      console.error('❌ Bulk toggle error:', error)
       setMenuItems(prevSnapshot)
     }
     setMasterToggling(false)
@@ -318,37 +322,29 @@ export default function AdminDashboard() {
     if (data) setTakeawayOrders(data)
   }
 
-  // Called when staff finishes customizing an item (portion size, add-ons, cooking pref) for a takeaway order
-  const handleTakeawayCustomizedAdd = (
-    item: any,
-    qty: number,
-    addOns: AddOn[],
-    cookingPreference?: string,
-    variant?: Variant,
-  ) => {
-    const unitPrice = (variant?.price ?? item.price) + addOns.reduce((s, a) => s + a.price, 0)
-    const displayName = `${item.name}${variant ? ` (${variant.name})` : ''}`
-    setTwItems(prev => [
-      ...prev,
-      { name: displayName, price: unitPrice, qty, addOns, variant: variant?.name, cookingPreference },
-    ])
-    setTwActiveItem(null)
-  }
-
   const saveTakeawayOrder = async () => {
     if (!twCustomer.trim() || twItems.length === 0) return
     setTwSaving(true)
     const total = twItems.reduce((s, i) => s + i.price * i.qty, 0)
+    // Flatten to a clean array for DB storage
+    const itemsForDb = twItems.map(i => ({
+      name: i.variantLabel ? `${i.name} (${i.variantLabel})` : i.name,
+      price: i.price,
+      qty: i.qty,
+      addons: i.addons || '',
+    }))
     await supabase.from('takeaway_orders').insert({
       customer_name: twCustomer.trim(),
       phone: twPhone.trim(),
       pickup_time: twPickup || 'ASAP',
       notes: twNotes.trim(),
-      items: twItems,
+      items: itemsForDb,
       total_amount: total,
       status: 'new',
     })
-    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes(''); setTwItems([])
+    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes('')
+    setTwItems([]); setTwPickingItem(null); setTwPickVariant(null)
+    setTwPickAddons(new Set()); setTwPickQty(1); setTwMenuSearch(''); setTwMenuCategory('All')
     setShowTakeawayForm(false)
     setTwSaving(false)
     fetchTakeawayOrders()
@@ -392,7 +388,7 @@ export default function AdminDashboard() {
       .select()
       .single()
     if (error) {
-      console.error('✗ addIngredient error:', error)
+      console.error('❌ addIngredient error:', error)
       setAddingIngredient(false)
       return
     }
@@ -413,7 +409,7 @@ export default function AdminDashboard() {
       .update({ quantity: newQty })
       .eq('id', id)
     if (error) {
-      console.error('✗ updateIngredientQty error:', error)
+      console.error('❌ updateIngredientQty error:', error)
       setIngredients(prev => prev.map(i => i.id === id ? { ...i, quantity: prevQty } : i))
     }
     setUpdatingIngId(null)
@@ -428,7 +424,7 @@ export default function AdminDashboard() {
       .delete()
       .eq('id', id)
     if (error) {
-      console.error('✗ deleteIngredient error:', error)
+      console.error('❌ deleteIngredient error:', error)
       setIngredients(prevSnapshot)
     }
     setDeletingIngId(null)
@@ -519,14 +515,14 @@ export default function AdminDashboard() {
   const updateOrderStatus = async (orderId: string, newStatus: string) => {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o))
     const { error } = await supabase.from('orders').update({ status: newStatus }).eq('id', orderId)
-    if (error) { console.error('✗ Update error:', error); fetchOrders() }
+    if (error) { console.error('❌ Update error:', error); fetchOrders() }
   }
 
   const markAsPaid = async (orderId: string) => {
     setUpdatingPayment(orderId)
     const { error } = await supabase.from('orders').update({ payment_status: 'paid' }).eq('id', orderId)
     if (!error) fetchOrders()
-    else console.error('✗ Payment update error:', error)
+    else console.error('❌ Payment update error:', error)
     setUpdatingPayment(null)
   }
 
@@ -921,7 +917,7 @@ export default function AdminDashboard() {
     setUpdatingPayment(orderIds[0])
     const { error } = await supabase.from('orders').update({ payment_status: 'paid' }).in('id', orderIds)
     if (!error) fetchOrders()
-    else console.error('✗ Group payment update error:', error)
+    else console.error('❌ Group payment update error:', error)
     setUpdatingPayment(null)
   }
 
@@ -1725,9 +1721,9 @@ export default function AdminDashboard() {
                           <span className="flex items-center gap-2"><Download className="w-4 h-4" /> Print Bill</span>
                         )}
                       </Button>
-                      {/* 🟢 NEW WHATSAPP BILL BUTTON 🟢 */}
+                      {/* 🟢 NAYA WHATSAPP BILL BUTTON 🟢 */}
                       {(() => {
-                        // Get the phone number from the first order in the group
+                        // Group ke first order se phone number nikal rahe hain
                         const orderWithPhone = orders.find(o => o.id === group.orderIds[0]);
                         if (orderWithPhone?.phone_number && orderWithPhone.phone_number.length >= 10) {
                           return (
@@ -1735,14 +1731,14 @@ export default function AdminDashboard() {
                               className="w-full bg-[#25D366] hover:bg-[#1DA851] text-white font-bold h-11 text-sm shadow-lg shadow-green-900/20"
                               onClick={() => handleSendWhatsApp({
                                 ...orderWithPhone,
-                                total_amount: group.totalAmount // If multiple orders are merged, send the combined total
+                                total_amount: group.totalAmount // Agar multiple orders merge hue hain toh total bhejo
                               })}
                             >
                               <span className="flex items-center gap-2">💬 Send WhatsApp Bill</span>
                             </Button>
                           );
                         }
-                        return null; // Hide the button if there's no phone number
+                        return null; // Agar phone number nahi hai toh button chup jayega
                       })()}
                       {/* Mark as Paid — triggers print confirm */}
                       <Button
@@ -1875,7 +1871,7 @@ export default function AdminDashboard() {
                   </thead>
                   <tbody>
                     {filteredHistoryOrders.length === 0 ? (
-                      <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500">No orders found in this period.</td></tr>
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500">Koi order nahi mila is period mein.</td></tr>
                     ) : filteredHistoryOrders.map(order => {
                       const isExpanded = expandedHistoryId === order.id
                       return (
@@ -2121,7 +2117,7 @@ export default function AdminDashboard() {
                 <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
                   {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">One switch to turn the entire menu ON or OFF</p>
+                <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
               </div>
               <Switch
                 checked={allMenuAvailable}
@@ -2213,7 +2209,7 @@ export default function AdminDashboard() {
                 <p className="text-slate-500 text-sm mt-1">
                   {invView === 'menu'
                     ? 'Track stock quantity and switch items off when unavailable.'
-                    : 'Raw materials like vegetables, spices — add and manage manually.'}
+                    : 'Raw materials jaise sabziyan, masale — manually add aur manage karo.'}
                   {invView === 'menu' && outOfStockCount > 0 && (
                     <span className="ml-2 text-red-400 font-semibold">{outOfStockCount} out of stock</span>
                   )}
@@ -2221,10 +2217,10 @@ export default function AdminDashboard() {
                     <span className="ml-2 text-amber-400 font-semibold">{lowStockCount} low stock</span>
                   )}
                   {invView === 'ingredients' && outOfStockIngredientsCount > 0 && (
-                    <span className="ml-2 text-red-400 font-semibold">{outOfStockIngredientsCount} out of stock</span>
+                    <span className="ml-2 text-red-400 font-semibold">{outOfStockIngredientsCount} khatam</span>
                   )}
                   {invView === 'ingredients' && lowStockIngredientsCount > 0 && (
-                    <span className="ml-2 text-amber-400 font-semibold">{lowStockIngredientsCount} low stock</span>
+                    <span className="ml-2 text-amber-400 font-semibold">{lowStockIngredientsCount} kam bacha</span>
                   )}
                 </p>
               </div>
@@ -2260,7 +2256,7 @@ export default function AdminDashboard() {
                     <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
                       {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5">One switch to turn the entire menu ON or OFF</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
                   </div>
                   <Switch
                     checked={allMenuAvailable}
@@ -2409,21 +2405,21 @@ export default function AdminDashboard() {
                   </div>
                   <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 text-center">
                     <p className="text-lg font-bold text-amber-400">{lowStockIngredientsCount}</p>
-                    <p className="text-xs text-slate-500">Low Stock</p>
+                    <p className="text-xs text-slate-500">Kam Bacha</p>
                   </div>
                   <div className="bg-slate-900 border border-red-900/40 rounded-xl p-3 text-center">
                     <p className="text-lg font-bold text-red-400">{outOfStockIngredientsCount}</p>
-                    <p className="text-xs text-slate-500">Out of Stock</p>
+                    <p className="text-xs text-slate-500">Khatam</p>
                   </div>
                 </div>
 
                 {/* Add new ingredient form */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 mb-6">
-                  <h3 className="text-sm font-bold text-slate-200 mb-3">Add New Ingredient</h3>
+                  <h3 className="text-sm font-bold text-slate-200 mb-3">Naya Ingredient Add Karo</h3>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
-                      placeholder="Name (e.g. Tomato, Onion, Paneer...)"
+                      placeholder="Naam (jaise Tomato, Onion, Paneer...)"
                       value={newIngName}
                       onChange={e => setNewIngName(e.target.value)}
                       className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
@@ -2478,7 +2474,7 @@ export default function AdminDashboard() {
                   <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
                     <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
                     <p className="text-slate-400">
-                      {ingredients.length === 0 ? 'No ingredients added yet. Add one above.' : 'No ingredients found.'}
+                      {ingredients.length === 0 ? 'Abhi tak koi ingredient add nahi hua. Upar se add karo.' : 'Koi ingredient nahi mila.'}
                     </p>
                   </div>
                 ) : (
@@ -2496,12 +2492,12 @@ export default function AdminDashboard() {
                               <p className="text-xs text-slate-500">{qty} {ing.unit}</p>
                               {isOut && (
                                 <span className="flex items-center gap-1 text-[10px] font-semibold text-red-400 bg-red-900/30 border border-red-800/50 px-1.5 py-0.5 rounded">
-                                  <AlertTriangle className="w-3 h-3" /> Out of Stock
+                                  <AlertTriangle className="w-3 h-3" /> Khatam
                                 </span>
                               )}
                               {isLow && (
                                 <span className="text-[10px] font-semibold text-amber-400 bg-amber-900/30 border border-amber-800/50 px-1.5 py-0.5 rounded">
-                                  Low stock
+                                  Kam bacha
                                 </span>
                               )}
                             </div>
@@ -2691,7 +2687,7 @@ export default function AdminDashboard() {
                       <div className="flex items-center gap-2">
                         {/* Present today toggle */}
                         <div className="flex flex-col items-center gap-1">
-                          <span className="text-[10px] text-slate-500">{member.present_today ? '✓ Present' : '✗ Absent'}</span>
+                          <span className="text-[10px] text-slate-500">{member.present_today ? '✅ Present' : '❌ Absent'}</span>
                           <Switch
                             checked={member.present_today}
                             onCheckedChange={async (val) => {
@@ -2755,72 +2751,222 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Item picker from menu — opens the full customization modal (portion size / add-ons / cooking preference) */}
+              {/* ── MENU ITEM PICKER ── */}
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Add Items from Menu *</label>
-                <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
-                  {menuItems.length === 0 && <p className="text-slate-500 text-xs text-center py-3">Loading menu…</p>}
-                  {menuItems.map((mi: any) => {
-                    const hasVariants = Array.isArray(mi.variants) && mi.variants.length > 0
-                    const hasAddons   = Array.isArray(mi.add_ons) && mi.add_ons.length > 0
-                    return (
-                      <div key={mi.id} className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-slate-700 transition-colors">
-                        <div>
-                          <p className="text-sm text-white font-medium">{mi.name}</p>
-                          <p className="text-xs text-slate-400">
-                            {hasVariants ? `From ₹${Math.min(...mi.variants.map((v: any) => v.price))}` : `₹${mi.price}`}
-                            {(hasVariants || hasAddons) && <span className="text-slate-600"> · customizable</span>}
-                          </p>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Add Items *</label>
+
+                {/* Category filter + search */}
+                {!twPickingItem && (
+                  <>
+                    <input
+                      value={twMenuSearch}
+                      onChange={e => setTwMenuSearch(e.target.value)}
+                      placeholder="Search menu…"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 mb-2"
+                    />
+                    {/* Category chips */}
+                    {(() => {
+                      const cats = ['All', ...Array.from(new Set(menuItems.map((m: any) => m.category).filter(Boolean)))]
+                      return (
+                        <div className="flex gap-1.5 overflow-x-auto pb-1 mb-2 no-scrollbar">
+                          {cats.map(cat => (
+                            <button
+                              key={cat}
+                              onClick={() => setTwMenuCategory(cat)}
+                              className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap shrink-0 transition-colors ${
+                                twMenuCategory === cat
+                                  ? 'bg-orange-600 text-white'
+                                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                              }`}
+                            >
+                              {cat}
+                            </button>
+                          ))}
                         </div>
-                        <button
-                          onClick={() => setTwActiveItem(mi)}
-                          className="text-xs bg-orange-600 hover:bg-orange-700 text-white px-3 py-1 rounded-lg font-bold transition-colors"
-                        >
-                          Add
-                        </button>
+                      )
+                    })()}
+                  </>
+                )}
+
+                {/* ── Sub-picker: when an item is tapped, show its variants + addons ── */}
+                {twPickingItem ? (
+                  <div className="bg-slate-800 rounded-2xl border border-orange-500/30 p-4 space-y-4">
+                    {/* Header */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-white text-sm">{twPickingItem.name}</p>
+                        <p className="text-xs text-slate-400">{twPickingItem.category}</p>
                       </div>
-                    )
-                  })}
-                </div>
+                      <button onClick={() => { setTwPickingItem(null); setTwPickVariant(null); setTwPickAddons(new Set()); setTwPickQty(1) }} className="text-slate-500 hover:text-white transition-colors text-xs">✕ Cancel</button>
+                    </div>
+
+                    {/* Variants — if item has them */}
+                    {Array.isArray(twPickingItem.variants) && twPickingItem.variants.length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Size / Portion <span className="text-red-400">*</span></p>
+                        <div className="space-y-1.5">
+                          {twPickingItem.variants.map((v: any) => (
+                            <button
+                              key={v.name}
+                              onClick={() => setTwPickVariant(v)}
+                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-left transition-all ${
+                                twPickVariant?.name === v.name
+                                  ? 'border-orange-500 bg-orange-600/10'
+                                  : 'border-slate-700 bg-slate-700/40 hover:border-slate-500'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${twPickVariant?.name === v.name ? 'border-orange-500' : 'border-slate-500'}`}>
+                                  {twPickVariant?.name === v.name && <div className="w-2 h-2 rounded-full bg-orange-500" />}
+                                </div>
+                                <span className="text-sm text-white font-medium">{v.name}</span>
+                              </div>
+                              <span className="text-sm font-bold text-orange-400">₹{v.price}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Add-ons — if item has them */}
+                    {Array.isArray(twPickingItem.addons) && twPickingItem.addons.length > 0 && (
+                      <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Add Extras <span className="text-slate-600">(optional)</span></p>
+                        <div className="space-y-1.5">
+                          {twPickingItem.addons.map((a: any) => {
+                            const sel = twPickAddons.has(a.name)
+                            return (
+                              <button
+                                key={a.name}
+                                onClick={() => setTwPickAddons(prev => {
+                                  const next = new Set(prev)
+                                  sel ? next.delete(a.name) : next.add(a.name)
+                                  return next
+                                })}
+                                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-left transition-all ${
+                                  sel ? 'border-orange-500 bg-orange-600/10' : 'border-slate-700 bg-slate-700/40 hover:border-slate-500'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'border-orange-500 bg-orange-500' : 'border-slate-500'}`}>
+                                    {sel && <span className="text-white text-[10px] font-black">✓</span>}
+                                  </div>
+                                  <span className="text-sm text-white font-medium">{a.name}</span>
+                                </div>
+                                <span className="text-sm text-slate-400">+ ₹{a.price}</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Quantity + Add button */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2 bg-slate-700 rounded-xl px-3 py-2">
+                        <button onClick={() => setTwPickQty(q => Math.max(1, q - 1))} className="w-6 h-6 flex items-center justify-center text-orange-400 font-bold"><Minus className="w-3.5 h-3.5" /></button>
+                        <span className="text-white font-bold text-sm w-5 text-center">{twPickQty}</span>
+                        <button onClick={() => setTwPickQty(q => q + 1)} className="w-6 h-6 flex items-center justify-center text-orange-400 font-bold"><Plus className="w-3.5 h-3.5" /></button>
+                      </div>
+                      <button
+                        disabled={Array.isArray(twPickingItem.variants) && twPickingItem.variants.length > 0 && !twPickVariant}
+                        onClick={() => {
+                          const basePrice = twPickVariant ? twPickVariant.price : twPickingItem.price
+                          const addonsArr = twPickingItem.addons?.filter((a: any) => twPickAddons.has(a.name)) || []
+                          const addonsTotal = addonsArr.reduce((s: number, a: any) => s + a.price, 0)
+                          const finalPrice = basePrice + addonsTotal
+                          const variantLabel = twPickVariant?.name || ''
+                          const addonsLabel = addonsArr.map((a: any) => a.name).join(', ')
+                          // Unique key: item name + variant + addons combo
+                          const key = `${twPickingItem.name}|${variantLabel}|${addonsLabel}`
+                          setTwItems(prev => {
+                            const existing = prev.find(i => `${i.name}|${i.variantLabel}|${i.addons}` === key)
+                            if (existing) {
+                              return prev.map(i => `${i.name}|${i.variantLabel}|${i.addons}` === key
+                                ? { ...i, qty: i.qty + twPickQty } : i)
+                            }
+                            return [...prev, { name: twPickingItem.name, price: finalPrice, qty: twPickQty, variantLabel, addons: addonsLabel }]
+                          })
+                          setTwPickingItem(null); setTwPickVariant(null); setTwPickAddons(new Set()); setTwPickQty(1)
+                        }}
+                        className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
+                      >
+                        {(() => {
+                          const basePrice = twPickVariant ? twPickVariant.price : twPickingItem.price
+                          const addonsTotal = twPickingItem.addons?.filter((a: any) => twPickAddons.has(a.name)).reduce((s: number, a: any) => s + a.price, 0) || 0
+                          return `Add to Order — ₹${(basePrice + addonsTotal) * twPickQty}`
+                        })()}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── Menu item list ── */
+                  <div className="max-h-52 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
+                    {menuItems.length === 0 && <p className="text-slate-500 text-xs text-center py-3">Loading menu…</p>}
+                    {menuItems
+                      .filter((mi: any) =>
+                        (twMenuCategory === 'All' || mi.category === twMenuCategory) &&
+                        (!twMenuSearch || mi.name.toLowerCase().includes(twMenuSearch.toLowerCase()))
+                      )
+                      .map((mi: any) => {
+                        const cartCount = twItems.filter(i => i.name === mi.name).reduce((s, i) => s + i.qty, 0)
+                        const hasVariants = Array.isArray(mi.variants) && mi.variants.length > 0
+                        const hasAddons   = Array.isArray(mi.addons)   && mi.addons.length > 0
+                        return (
+                          <div key={mi.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-700 transition-colors cursor-pointer" onClick={() => { setTwPickingItem(mi); setTwPickQty(1); setTwPickVariant(null); setTwPickAddons(new Set()) }}>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm text-white font-semibold truncate">{mi.name}</p>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <p className="text-xs text-orange-400 font-bold">
+                                  {hasVariants ? `₹${mi.variants[0].price}+` : `₹${mi.price}`}
+                                </p>
+                                {hasVariants && <span className="text-[10px] bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded-full">{mi.variants.length} sizes</span>}
+                                {hasAddons   && <span className="text-[10px] bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded-full">{mi.addons.length} extras</span>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              {cartCount > 0 && (
+                                <span className="bg-orange-600 text-white text-xs font-black px-2 py-0.5 rounded-full">{cartCount}</span>
+                              )}
+                              <span className="text-xs text-orange-500 font-bold">+ Add</span>
+                            </div>
+                          </div>
+                        )
+                      })
+                    }
+                  </div>
+                )}
               </div>
 
               {/* Order summary */}
               {twItems.length > 0 && (
                 <div className="bg-slate-800 rounded-xl p-3 space-y-2">
-                  <p className="text-xs font-bold text-slate-400 uppercase mb-1">Order Summary</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Order Summary</p>
                   {twItems.map((item, i) => (
-                    <div key={i} className="flex items-start justify-between text-sm gap-2 pb-2 border-b border-slate-700/60 last:border-b-0 last:pb-0">
-                      <div className="min-w-0">
-                        <p className="text-slate-200 font-medium truncate">{item.name}</p>
-                        {(item.addOns?.length || item.cookingPreference) && (
-                          <p className="text-xs text-slate-500 truncate">
-                            {item.cookingPreference ? item.cookingPreference : ''}
-                            {item.addOns?.length ? `${item.cookingPreference ? ' · ' : ''}+ ${item.addOns.map(a => a.name).join(', ')}` : ''}
-                          </p>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
-                          <button onClick={() => setTwItems(prev => prev.map((it, idx) => idx === i ? { ...it, qty: Math.max(1, it.qty - 1) } : it))} className="w-5 h-5 bg-slate-600 rounded-full text-white flex items-center justify-center text-xs">−</button>
-                          <span className="text-white text-xs font-bold w-4 text-center">{item.qty}</span>
-                          <button onClick={() => setTwItems(prev => prev.map((it, idx) => idx === i ? { ...it, qty: it.qty + 1 } : it))} className="w-5 h-5 bg-orange-600 rounded-full text-white flex items-center justify-center text-xs">+</button>
-                          <button onClick={() => setTwItems(prev => prev.filter((_, idx) => idx !== i))} className="text-xs text-red-400 hover:text-red-300 ml-1">Remove</button>
+                    <div key={i} className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm text-slate-200">{item.qty}× {item.name}</span>
+                          {item.variantLabel && <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full shrink-0">{item.variantLabel}</span>}
                         </div>
+                        {item.addons && <p className="text-xs text-orange-400 mt-0.5">+ {item.addons}</p>}
                       </div>
-                      <span className="text-slate-400 shrink-0">₹{item.price * item.qty}</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-slate-400 text-sm">₹{item.price * item.qty}</span>
+                        <button
+                          onClick={() => setTwItems(prev => prev.filter((_, idx) => idx !== i))}
+                          className="text-slate-600 hover:text-red-400 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
-                  <div className="border-t border-slate-700 pt-2 mt-2 flex justify-between font-bold">
+                  <div className="border-t border-slate-700 pt-2 mt-1 flex justify-between font-bold">
                     <span className="text-white">Total</span>
                     <span className="text-orange-400">₹{twItems.reduce((s, i) => s + i.price * i.qty, 0)}</span>
                   </div>
                 </div>
-              )}
-
-              {twActiveItem && (
-                <ItemCustomizationModal
-                  item={twActiveItem}
-                  onClose={() => setTwActiveItem(null)}
-                  onAddToCart={handleTakeawayCustomizedAdd}
-                />
               )}
             </div>
             <div className="px-5 py-4 border-t border-slate-800 shrink-0">
@@ -3160,8 +3306,8 @@ export default function AdminDashboard() {
             <div className="px-5 py-4">
               <p className="text-slate-300 text-sm mb-5">
                 {masterToggleConfirm === 'off'
-                  ? 'This will instantly hide all menu items from customers — as if the restaurant is closed.'
-                  : 'This will make all menu items available again — even if some were manually turned off before (e.g. out of stock).'}
+                  ? 'Ye sabhi menu items ko customers se turant hide kar dega — jaise restaurant band ho gaya ho.'
+                  : 'Ye sabhi menu items ko wapas available kar dega — chahe pehle kisi item ko manually off kiya tha (jaise out of stock).'}
               </p>
               <div className="flex gap-2">
                 <button
