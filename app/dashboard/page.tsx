@@ -101,6 +101,13 @@ export default function AdminDashboard() {
   const [sfShiftEnd, setSfShiftEnd]           = useState('18:00')
   const [sfNotes, setSfNotes]                 = useState('')
   const [sfSaving, setSfSaving]               = useState(false)
+
+  // ── Staff Attendance (day-wise / monthly) State ─────────────────────────────
+  const [attendanceStaff, setAttendanceStaff]   = useState<any>(null)
+  const [attendanceMonth, setAttendanceMonth]   = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() } })
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([])
+  const [attendanceLoading, setAttendanceLoading] = useState(false)
+  const [markingDate, setMarkingDate]           = useState<string | null>(null)
   const router        = useRouter()
 
   // ── Menu Control State ────────────────────────────────────────────────────
@@ -385,6 +392,66 @@ export default function AdminDashboard() {
     setShowStaffForm(false)
     setSfSaving(false)
     fetchStaff()
+  }
+
+  // ── Staff Attendance (day-wise / monthly) ───────────────────────────────────
+  const todayStr = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+
+  const fetchAttendance = async (staffId: string, year: number, month: number) => {
+    setAttendanceLoading(true)
+    const firstDay = `${year}-${String(month + 1).padStart(2, '0')}-01`
+    const lastDayNum = new Date(year, month + 1, 0).getDate()
+    const lastDay = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDayNum).padStart(2, '0')}`
+    const { data, error } = await supabase
+      .from('staff_attendance')
+      .select('*')
+      .eq('staff_id', staffId)
+      .gte('date', firstDay)
+      .lte('date', lastDay)
+    if (error) { console.error('fetchAttendance error:', error); setAttendanceLoading(false); return }
+    if (data) setAttendanceRecords(data)
+    setAttendanceLoading(false)
+  }
+
+  // Cycle: none -> present -> absent -> half_day -> leave -> none
+  const markAttendance = async (staffId: string, date: string, status: string | null) => {
+    setMarkingDate(date)
+    if (status === null) {
+      await supabase.from('staff_attendance').delete().eq('staff_id', staffId).eq('date', date)
+    } else {
+      await supabase.from('staff_attendance').upsert(
+        { staff_id: staffId, date, status },
+        { onConflict: 'staff_id,date' }
+      )
+    }
+    // Keep quick "present_today" flag on staff row in sync for today's date
+    if (date === todayStr()) {
+      await supabase.from('staff').update({ present_today: status === 'present' }).eq('id', staffId)
+      fetchStaff()
+    }
+    await fetchAttendance(staffId, attendanceMonth.year, attendanceMonth.month)
+    setMarkingDate(null)
+  }
+
+  const openAttendance = (member: any) => {
+    setAttendanceStaff(member)
+    const d = new Date()
+    setAttendanceMonth({ year: d.getFullYear(), month: d.getMonth() })
+    fetchAttendance(member.id, d.getFullYear(), d.getMonth())
+  }
+
+  const changeAttendanceMonth = (delta: number) => {
+    setAttendanceMonth(prev => {
+      let { year, month } = prev
+      month += delta
+      if (month < 0) { month = 11; year -= 1 }
+      if (month > 11) { month = 0; year += 1 }
+      if (attendanceStaff) fetchAttendance(attendanceStaff.id, year, month)
+      return { year, month }
+    })
   }
 
   const addIngredient = async () => {
@@ -2705,11 +2772,17 @@ export default function AdminDashboard() {
                           <Switch
                             checked={member.present_today}
                             onCheckedChange={async (val) => {
-                              await supabase.from('staff').update({ present_today: val }).eq('id', member.id)
-                              fetchStaff()
+                              await markAttendance(member.id, todayStr(), val ? 'present' : 'absent')
                             }}
                           />
                         </div>
+                        <button
+                          onClick={() => openAttendance(member)}
+                          className="p-2 text-slate-500 hover:text-orange-400 hover:bg-orange-500/10 rounded-xl transition-colors"
+                          title="View attendance history"
+                        >
+                          <CalendarDays className="w-4 h-4" />
+                        </button>
                         <button
                           onClick={async () => {
                             if (!window.confirm(`Remove ${member.name} from staff?`)) return
@@ -3026,6 +3099,119 @@ export default function AdminDashboard() {
               >
                 {twSaving ? 'Placing Order…' : `Place Takeaway Order${twItems.length > 0 ? ` — ₹${twItems.reduce((s, i) => s + i.price * i.qty, 0)}` : ''}`}
               </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── STAFF ATTENDANCE CALENDAR MODAL ─────────────────────────────────── */}
+      {attendanceStaff && (
+        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setAttendanceStaff(null)}>
+          <div className="bg-slate-900 w-full max-w-md rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" style={{ maxHeight: '90dvh' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
+              <div>
+                <h2 className="text-lg font-bold text-white">{attendanceStaff.name}</h2>
+                <p className="text-xs text-slate-500">Attendance history</p>
+              </div>
+              <button onClick={() => setAttendanceStaff(null)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors"><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-5">
+              {/* Month navigation */}
+              <div className="flex items-center justify-between mb-4">
+                <button onClick={() => changeAttendanceMonth(-1)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors">‹</button>
+                <p className="text-sm font-bold text-white">
+                  {new Date(attendanceMonth.year, attendanceMonth.month).toLocaleString('en-US', { month: 'long', year: 'numeric' })}
+                </p>
+                <button onClick={() => changeAttendanceMonth(1)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors">›</button>
+              </div>
+
+              {/* Monthly summary */}
+              {(() => {
+                const presentCount = attendanceRecords.filter(r => r.status === 'present').length
+                const absentCount  = attendanceRecords.filter(r => r.status === 'absent').length
+                const halfDayCount = attendanceRecords.filter(r => r.status === 'half_day').length
+                const leaveCount   = attendanceRecords.filter(r => r.status === 'leave').length
+                return (
+                  <div className="grid grid-cols-4 gap-2 mb-4">
+                    <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-lg p-2 text-center">
+                      <p className="text-base font-bold text-emerald-400">{presentCount}</p>
+                      <p className="text-[10px] text-slate-500">Present</p>
+                    </div>
+                    <div className="bg-red-950/30 border border-red-800/40 rounded-lg p-2 text-center">
+                      <p className="text-base font-bold text-red-400">{absentCount}</p>
+                      <p className="text-[10px] text-slate-500">Absent</p>
+                    </div>
+                    <div className="bg-amber-950/30 border border-amber-800/40 rounded-lg p-2 text-center">
+                      <p className="text-base font-bold text-amber-400">{halfDayCount}</p>
+                      <p className="text-[10px] text-slate-500">Half Day</p>
+                    </div>
+                    <div className="bg-sky-950/30 border border-sky-800/40 rounded-lg p-2 text-center">
+                      <p className="text-base font-bold text-sky-400">{leaveCount}</p>
+                      <p className="text-[10px] text-slate-500">Leave</p>
+                    </div>
+                  </div>
+                )
+              })()}
+
+              {/* Legend */}
+              <div className="flex items-center gap-3 mb-3 text-[10px] text-slate-500 flex-wrap">
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Present</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> Absent</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" /> Half Day</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block" /> Leave</span>
+                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-700 inline-block" /> Not marked</span>
+              </div>
+              <p className="text-[10px] text-slate-600 mb-3">Tap a date to cycle: Present → Absent → Half Day → Leave → clear</p>
+
+              {/* Calendar grid */}
+              {attendanceLoading ? (
+                <div className="text-center py-10 text-slate-500 text-sm">Loading…</div>
+              ) : (
+                <div>
+                  <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] text-slate-600 font-bold">
+                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i}>{d}</div>)}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {(() => {
+                      const { year, month } = attendanceMonth
+                      const firstDow = new Date(year, month, 1).getDay()
+                      const daysInMonth = new Date(year, month + 1, 0).getDate()
+                      const today = todayStr()
+                      const cells = []
+                      for (let i = 0; i < firstDow; i++) cells.push(<div key={`empty-${i}`} />)
+                      for (let day = 1; day <= daysInMonth; day++) {
+                        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                        const record = attendanceRecords.find(r => r.date === dateStr)
+                        const isFuture = dateStr > today
+                        const isToday = dateStr === today
+                        const statusColor =
+                          record?.status === 'present'  ? 'bg-emerald-500 text-white' :
+                          record?.status === 'absent'   ? 'bg-red-500 text-white' :
+                          record?.status === 'half_day' ? 'bg-amber-500 text-white' :
+                          record?.status === 'leave'    ? 'bg-sky-500 text-white' :
+                          'bg-slate-800 text-slate-400'
+                        const nextStatus = (cur: string | undefined) =>
+                          cur === undefined ? 'present' :
+                          cur === 'present' ? 'absent' :
+                          cur === 'absent' ? 'half_day' :
+                          cur === 'half_day' ? 'leave' : null // leave -> clear
+                        cells.push(
+                          <button
+                            key={dateStr}
+                            disabled={isFuture || markingDate === dateStr}
+                            onClick={() => markAttendance(attendanceStaff.id, dateStr, nextStatus(record?.status))}
+                            className={`aspect-square rounded-lg text-xs font-semibold flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed ${statusColor} ${isToday ? 'ring-2 ring-orange-400' : ''} ${markingDate === dateStr ? 'opacity-50' : 'hover:opacity-80'}`}
+                          >
+                            {day}
+                          </button>
+                        )
+                      }
+                      return cells
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
