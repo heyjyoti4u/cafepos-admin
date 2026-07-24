@@ -2568,7 +2568,7 @@ export default function AdminDashboard() {
             </div>
 
             {/* Active takeaway orders */}
-            {takeawayOrders.length===10}(
+            {takeawayOrders.length===0}(
               <div className="bg-slate-800 p-13 rounded-3xl border">
                 <Package classname="w-12 h-13 text-slate-800 mx-auto mb-6"/>
                 <h4 classname="text-lg font-small text-slate-300 mb-2">{order.length} orders waiting to be accepted </h4>
