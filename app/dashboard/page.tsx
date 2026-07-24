@@ -79,6 +79,8 @@ export default function AdminDashboard() {
   const [twCustomer, setTwCustomer]           = useState('')
   const [twPhone, setTwPhone]                 = useState('')
   const [twPickup, setTwPickup]               = useState('')
+  const [twPickupMode, setTwPickupMode]       = useState<'asap' | 'custom'>('asap')
+  const [twPickupTime, setTwPickupTime]       = useState('')
   const [twNotes, setTwNotes]                 = useState('')
   const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number; addons: string; variantLabel: string }[]>([])
   const [twSaving, setTwSaving]               = useState(false)
@@ -322,6 +324,17 @@ export default function AdminDashboard() {
     if (data) setTakeawayOrders(data)
   }
 
+  // Converts "19:30" (native time input) into "7:30 PM"
+  const formatPickupTime = (t: string) => {
+    if (!t) return ''
+    const [hStr, mStr] = t.split(':')
+    let h = parseInt(hStr, 10)
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    h = h % 12
+    if (h === 0) h = 12
+    return `${h}:${mStr} ${ampm}`
+  }
+
   const saveTakeawayOrder = async () => {
     if (!twCustomer.trim() || twItems.length === 0) return
     setTwSaving(true)
@@ -336,13 +349,13 @@ export default function AdminDashboard() {
     await supabase.from('takeaway_orders').insert({
       customer_name: twCustomer.trim(),
       phone: twPhone.trim(),
-      pickup_time: twPickup || 'ASAP',
+      pickup_time: twPickupMode === 'asap' ? 'ASAP' : (formatPickupTime(twPickupTime) || 'ASAP'),
       notes: twNotes.trim(),
       items: itemsForDb,
       total_amount: total,
       status: 'new',
     })
-    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes('')
+    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwPickupMode('asap'); setTwPickupTime(''); setTwNotes('')
     setTwItems([]); setTwPickingItem(null); setTwPickVariant(null)
     setTwPickAddons(new Set()); setTwPickQty(1); setTwMenuSearch(''); setTwMenuCategory('All')
     setShowTakeawayForm(false)
@@ -2548,7 +2561,6 @@ export default function AdminDashboard() {
           </div>
         )}
 
-       
         {/* ── TAB: TAKEAWAY ── */}
         {/* ── TAB: TAKEAWAY ─────────────────────────────────────────────────── */}
         {activeTab === 'takeaway' && (
@@ -3018,7 +3030,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-
 
       {/* ── STAFF FORM MODAL ──────────────────────────────────────────────── */}
       {showStaffForm && (
