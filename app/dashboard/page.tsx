@@ -2548,6 +2548,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
+       
         {/* ── TAB: TAKEAWAY ── */}
         {/* ── TAB: TAKEAWAY ─────────────────────────────────────────────────── */}
         {activeTab === 'takeaway' && (
@@ -2594,7 +2595,7 @@ export default function AdminDashboard() {
                             <p className="font-bold text-white text-base">{order.customer_name}</p>
                             <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.color}`}>{cfg.label}</span>
                           </div>
-                          <p className="text-xs text-slate-400">{order.phone} · Pickup: {order.pickup_time}</p>
+                          <p className="text-xs text-slate-400 flex items-center gap-1">{order.phone} · <Clock className="w-3 h-3 inline" /> Pickup: {order.pickup_time}</p>
                           {order.notes && <p className="text-xs text-amber-400 mt-0.5 italic">📝 {order.notes}</p>}
                         </div>
                         <p className="text-orange-400 font-bold text-base shrink-0">₹{order.total_amount}</p>
@@ -2731,25 +2732,60 @@ export default function AdminDashboard() {
             </div>
             <div className="overflow-y-auto flex-1 p-5 space-y-4">
               {/* Customer info */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Customer Name *</label>
-                  <input value={twCustomer} onChange={e => setTwCustomer(e.target.value)} placeholder="Name" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                  <input value={twCustomer} onChange={e => setTwCustomer(e.target.value)} placeholder="Name" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Phone</label>
-                  <input value={twPhone} onChange={e => setTwPhone(e.target.value)} placeholder="+91 XXXXX" type="tel" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                  <input value={twPhone} onChange={e => setTwPhone(e.target.value)} placeholder="+91 XXXXX" type="tel" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Pickup Time</label>
-                  <input value={twPickup} onChange={e => setTwPickup(e.target.value)} placeholder="e.g. 7:30 PM / ASAP" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+
+              {/* Pickup Time — ASAP or exact clock time */}
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Pickup Time</label>
+                <div className="flex gap-2 mb-2">
+                  <button
+                    type="button"
+                    onClick={() => setTwPickupMode('asap')}
+                    className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
+                      twPickupMode === 'asap'
+                        ? 'bg-orange-600 border-orange-600 text-white'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    ASAP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTwPickupMode('custom')}
+                    className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
+                      twPickupMode === 'custom'
+                        ? 'bg-orange-600 border-orange-600 text-white'
+                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+                    }`}
+                  >
+                    <Clock className="w-4 h-4" /> Pick Exact Time
+                  </button>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Notes</label>
-                  <input value={twNotes} onChange={e => setTwNotes(e.target.value)} placeholder="Special instructions" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
-                </div>
+                {twPickupMode === 'custom' && (
+                  <div className="relative">
+                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                    <input
+                      type="time"
+                      value={twPickupTime}
+                      onChange={e => setTwPickupTime(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Notes</label>
+                <input value={twNotes} onChange={e => setTwNotes(e.target.value)} placeholder="Special instructions" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
               </div>
 
               {/* ── MENU ITEM PICKER ── */}
@@ -2758,7 +2794,7 @@ export default function AdminDashboard() {
 
                 {/* Category filter + search */}
                 {!twPickingItem && (
-                  <>
+                  <div className="sticky top-0 z-10 bg-slate-900 pb-2 -mx-0">
                     <input
                       value={twMenuSearch}
                       onChange={e => setTwMenuSearch(e.target.value)}
@@ -2774,7 +2810,7 @@ export default function AdminDashboard() {
                             <button
                               key={cat}
                               onClick={() => setTwMenuCategory(cat)}
-                              className={`text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap shrink-0 transition-colors ${
+                              className={`text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap shrink-0 transition-colors ${
                                 twMenuCategory === cat
                                   ? 'bg-orange-600 text-white'
                                   : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
@@ -2786,7 +2822,7 @@ export default function AdminDashboard() {
                         </div>
                       )
                     })()}
-                  </>
+                  </div>
                 )}
 
                 {/* ── Sub-picker: when an item is tapped, show its variants + addons ── */}
@@ -2902,7 +2938,7 @@ export default function AdminDashboard() {
                   </div>
                 ) : (
                   /* ── Menu item list ── */
-                  <div className="max-h-52 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
+                  <div className="max-h-64 sm:max-h-72 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
                     {menuItems.length === 0 && <p className="text-slate-500 text-xs text-center py-3">Loading menu…</p>}
                     {menuItems
                       .filter((mi: any) =>
@@ -2914,7 +2950,7 @@ export default function AdminDashboard() {
                         const hasVariants = Array.isArray(mi.variants) && mi.variants.length > 0
                         const hasAddons   = Array.isArray(mi.addons)   && mi.addons.length > 0
                         return (
-                          <div key={mi.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl hover:bg-slate-700 transition-colors cursor-pointer" onClick={() => { setTwPickingItem(mi); setTwPickQty(1); setTwPickVariant(null); setTwPickAddons(new Set()) }}>
+                          <div key={mi.id} className="flex items-center justify-between px-3 py-3 rounded-xl hover:bg-slate-700 active:bg-slate-700 transition-colors cursor-pointer" onClick={() => { setTwPickingItem(mi); setTwPickQty(1); setTwPickVariant(null); setTwPickAddons(new Set()) }}>
                             <div className="min-w-0 flex-1">
                               <p className="text-sm text-white font-semibold truncate">{mi.name}</p>
                               <div className="flex items-center gap-1.5 mt-0.5">
@@ -2982,6 +3018,7 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
 
       {/* ── STAFF FORM MODAL ──────────────────────────────────────────────── */}
       {showStaffForm && (
