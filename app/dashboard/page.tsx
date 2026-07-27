@@ -321,6 +321,8 @@ export default function AdminDashboard() {
     setTwMenuSearch(''); setTwMenuCategory('All'); setTwStep(1)
     setShowTakeawayForm(false)
   }
+
+  const fetchTakeawayOrders = async () => {
     const { data } = await supabase
       .from('takeaway_orders')
       .select('*')
