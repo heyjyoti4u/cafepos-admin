@@ -314,7 +314,13 @@ export default function AdminDashboard() {
   }
 
   // ── Takeaway fetch + save ─────────────────────────────────────────────────
-  const fetchTakeawayOrders = async () => {
+  const resetTakeawayForm = () => {
+    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes('')
+    setTwItems([]); setTwPickingItem(null); setTwPickVariant(null)
+    setTwPickAddons(new Set()); setTwPickQty(1)
+    setTwMenuSearch(''); setTwMenuCategory('All'); setTwStep(1)
+    setShowTakeawayForm(false)
+  }
     const { data } = await supabase
       .from('takeaway_orders')
       .select('*')
@@ -343,11 +349,8 @@ export default function AdminDashboard() {
       total_amount: total,
       status: 'new',
     })
-    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes('')
-    setTwItems([]); setTwPickingItem(null); setTwPickVariant(null)
-    setTwPickAddons(new Set()); setTwPickQty(1); setTwMenuSearch(''); setTwMenuCategory('All'); setTwStep(1)
-    setShowTakeawayForm(false)
     setTwSaving(false)
+    resetTakeawayForm()
     fetchTakeawayOrders()
   }
 
@@ -2768,7 +2771,7 @@ export default function AdminDashboard() {
 
       {/* ── TAKEAWAY ORDER FORM MODAL ─────────────────────────────────────── */}
       {showTakeawayForm && (
-        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => { setShowTakeawayForm(false); setTwStep(1); setTwPickingItem(null) }}>
+        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={resetTakeawayForm}>
           <div className="bg-slate-900 w-full max-w-lg rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" style={{ maxHeight: '92dvh' }} onClick={e => e.stopPropagation()}>
 
             {/* Header */}
@@ -2786,7 +2789,7 @@ export default function AdminDashboard() {
                   <p className="text-xs text-slate-500">Step {twStep} of 3</p>
                 </div>
               </div>
-              <button onClick={() => { setShowTakeawayForm(false); setTwStep(1); setTwPickingItem(null) }} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
+              <button onClick={resetTakeawayForm} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
