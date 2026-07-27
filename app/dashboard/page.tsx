@@ -25,7 +25,7 @@ const PREP_BADGE: Record<string, { label: string; emoji: string; cls: string }> 
 
 const handleSendWhatsApp = (order: any) => {
   if (!order.phone_number || order.phone_number.length < 10) {
-    alert("Is order mein valid phone number nahi hai bhai!");
+    alert("Invalid phone number for this order!");
     return;
   }
 
@@ -45,7 +45,7 @@ const handleSendWhatsApp = (order: any) => {
   const encodedMessage = encodeURIComponent(message);
   const whatsappUrl = `https://api.whatsapp.com/send?phone=91${order.phone_number}&text=${encodedMessage}`;
 
-  // Naye tab mein WhatsApp open karega
+  // Opens WhatsApp in a new tab
   window.open(whatsappUrl, '_blank');
 };
 
@@ -79,8 +79,6 @@ export default function AdminDashboard() {
   const [twCustomer, setTwCustomer]           = useState('')
   const [twPhone, setTwPhone]                 = useState('')
   const [twPickup, setTwPickup]               = useState('')
-  const [twPickupMode, setTwPickupMode]       = useState<'asap' | 'custom'>('asap')
-  const [twPickupTime, setTwPickupTime]       = useState('')
   const [twNotes, setTwNotes]                 = useState('')
   const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number; addons: string; variantLabel: string }[]>([])
   const [twSaving, setTwSaving]               = useState(false)
@@ -91,6 +89,7 @@ export default function AdminDashboard() {
   const [twPickQty, setTwPickQty]             = useState(1)
   const [twMenuSearch, setTwMenuSearch]       = useState('')
   const [twMenuCategory, setTwMenuCategory]   = useState('All')
+  const [twStep, setTwStep]                   = useState<1|2|3>(1) // 1=details, 2=menu, 3=review
   // ── Staff ─────────────────────────────────────────────────────────────────
   const [staffList, setStaffList]             = useState<any[]>([])
   const [showStaffForm, setShowStaffForm]     = useState(false)
@@ -101,13 +100,6 @@ export default function AdminDashboard() {
   const [sfShiftEnd, setSfShiftEnd]           = useState('18:00')
   const [sfNotes, setSfNotes]                 = useState('')
   const [sfSaving, setSfSaving]               = useState(false)
-
-  // ── Staff Attendance (day-wise / monthly) State ─────────────────────────────
-  const [attendanceStaff, setAttendanceStaff]   = useState<any>(null)
-  const [attendanceMonth, setAttendanceMonth]   = useState(() => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() } })
-  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([])
-  const [attendanceLoading, setAttendanceLoading] = useState(false)
-  const [markingDate, setMarkingDate]           = useState<string | null>(null)
   const router        = useRouter()
 
   // ── Menu Control State ────────────────────────────────────────────────────
@@ -331,17 +323,6 @@ export default function AdminDashboard() {
     if (data) setTakeawayOrders(data)
   }
 
-  // Converts "19:30" (native time input) into "7:30 PM"
-  const formatPickupTime = (t: string) => {
-    if (!t) return ''
-    const [hStr, mStr] = t.split(':')
-    let h = parseInt(hStr, 10)
-    const ampm = h >= 12 ? 'PM' : 'AM'
-    h = h % 12
-    if (h === 0) h = 12
-    return `${h}:${mStr} ${ampm}`
-  }
-
   const saveTakeawayOrder = async () => {
     if (!twCustomer.trim() || twItems.length === 0) return
     setTwSaving(true)
@@ -356,15 +337,15 @@ export default function AdminDashboard() {
     await supabase.from('takeaway_orders').insert({
       customer_name: twCustomer.trim(),
       phone: twPhone.trim(),
-      pickup_time: twPickupMode === 'asap' ? 'ASAP' : (formatPickupTime(twPickupTime) || 'ASAP'),
+      pickup_time: twPickup || 'ASAP',
       notes: twNotes.trim(),
       items: itemsForDb,
       total_amount: total,
       status: 'new',
     })
-    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwPickupMode('asap'); setTwPickupTime(''); setTwNotes('')
+    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes('')
     setTwItems([]); setTwPickingItem(null); setTwPickVariant(null)
-    setTwPickAddons(new Set()); setTwPickQty(1); setTwMenuSearch(''); setTwMenuCategory('All')
+    setTwPickAddons(new Set()); setTwPickQty(1); setTwMenuSearch(''); setTwMenuCategory('All'); setTwStep(1)
     setShowTakeawayForm(false)
     setTwSaving(false)
     fetchTakeawayOrders()
@@ -392,66 +373,6 @@ export default function AdminDashboard() {
     setShowStaffForm(false)
     setSfSaving(false)
     fetchStaff()
-  }
-
-  // ── Staff Attendance (day-wise / monthly) ───────────────────────────────────
-  const todayStr = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
-
-  const fetchAttendance = async (staffId: string, year: number, month: number) => {
-    setAttendanceLoading(true)
-    const firstDay = `${year}-${String(month + 1).padStart(2, '0')}-01`
-    const lastDayNum = new Date(year, month + 1, 0).getDate()
-    const lastDay = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDayNum).padStart(2, '0')}`
-    const { data, error } = await supabase
-      .from('staff_attendance')
-      .select('*')
-      .eq('staff_id', staffId)
-      .gte('date', firstDay)
-      .lte('date', lastDay)
-    if (error) { console.error('fetchAttendance error:', error); setAttendanceLoading(false); return }
-    if (data) setAttendanceRecords(data)
-    setAttendanceLoading(false)
-  }
-
-  // Cycle: none -> present -> absent -> half_day -> leave -> none
-  const markAttendance = async (staffId: string, date: string, status: string | null) => {
-    setMarkingDate(date)
-    if (status === null) {
-      await supabase.from('staff_attendance').delete().eq('staff_id', staffId).eq('date', date)
-    } else {
-      await supabase.from('staff_attendance').upsert(
-        { staff_id: staffId, date, status },
-        { onConflict: 'staff_id,date' }
-      )
-    }
-    // Keep quick "present_today" flag on staff row in sync for today's date
-    if (date === todayStr()) {
-      await supabase.from('staff').update({ present_today: status === 'present' }).eq('id', staffId)
-      fetchStaff()
-    }
-    await fetchAttendance(staffId, attendanceMonth.year, attendanceMonth.month)
-    setMarkingDate(null)
-  }
-
-  const openAttendance = (member: any) => {
-    setAttendanceStaff(member)
-    const d = new Date()
-    setAttendanceMonth({ year: d.getFullYear(), month: d.getMonth() })
-    fetchAttendance(member.id, d.getFullYear(), d.getMonth())
-  }
-
-  const changeAttendanceMonth = (delta: number) => {
-    setAttendanceMonth(prev => {
-      let { year, month } = prev
-      month += delta
-      if (month < 0) { month = 11; year -= 1 }
-      if (month > 11) { month = 0; year += 1 }
-      if (attendanceStaff) fetchAttendance(attendanceStaff.id, year, month)
-      return { year, month }
-    })
   }
 
   const addIngredient = async () => {
@@ -1818,7 +1739,7 @@ export default function AdminDashboard() {
                             </Button>
                           );
                         }
-                        return null; // Agar phone number nahi hai toh button chup jayega
+                        return null; // Hide button if no phone number
                       })()}
                       {/* Mark as Paid — triggers print confirm */}
                       <Button
@@ -1951,7 +1872,7 @@ export default function AdminDashboard() {
                   </thead>
                   <tbody>
                     {filteredHistoryOrders.length === 0 ? (
-                      <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500">Koi order nahi mila is period mein.</td></tr>
+                      <tr><td colSpan={4} className="px-6 py-12 text-center text-slate-500">No orders found for this period.</td></tr>
                     ) : filteredHistoryOrders.map(order => {
                       const isExpanded = expandedHistoryId === order.id
                       return (
@@ -2197,7 +2118,7 @@ export default function AdminDashboard() {
                 <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
                   {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
                 </p>
-                <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
+                <p className="text-xs text-slate-500 mt-0.5">Toggle entire menu ON or OFF with one switch</p>
               </div>
               <Switch
                 checked={allMenuAvailable}
@@ -2289,7 +2210,7 @@ export default function AdminDashboard() {
                 <p className="text-slate-500 text-sm mt-1">
                   {invView === 'menu'
                     ? 'Track stock quantity and switch items off when unavailable.'
-                    : 'Raw materials jaise sabziyan, masale — manually add aur manage karo.'}
+                    : 'Raw materials like vegetables and spices — add and manage manually.'}
                   {invView === 'menu' && outOfStockCount > 0 && (
                     <span className="ml-2 text-red-400 font-semibold">{outOfStockCount} out of stock</span>
                   )}
@@ -2336,7 +2257,7 @@ export default function AdminDashboard() {
                     <p className={`text-sm font-bold ${allMenuAvailable ? 'text-emerald-300' : 'text-red-300'}`}>
                       {allMenuAvailable ? 'Restaurant Open' : 'Restaurant Closed / Partial'}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5">Ek hi switch se poora menu ON ya OFF karo</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Toggle entire menu ON or OFF with one switch</p>
                   </div>
                   <Switch
                     checked={allMenuAvailable}
@@ -2554,7 +2475,7 @@ export default function AdminDashboard() {
                   <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
                     <Boxes className="w-12 h-12 text-slate-700 mx-auto mb-4" />
                     <p className="text-slate-400">
-                      {ingredients.length === 0 ? 'Abhi tak koi ingredient add nahi hua. Upar se add karo.' : 'Koi ingredient nahi mila.'}
+                      {ingredients.length === 0 ? 'No ingredients added yet. Use the form above to add.' : 'No ingredients found.'}
                     </p>
                   </div>
                 ) : (
@@ -2631,85 +2552,129 @@ export default function AdminDashboard() {
         {/* ── TAB: TAKEAWAY ── */}
         {/* ── TAB: TAKEAWAY ─────────────────────────────────────────────────── */}
         {activeTab === 'takeaway' && (
-          <div className="max-w-5xl mx-auto">
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 border-b border-slate-800 pb-4 gap-3">
-              <h1 className="text-xl md:text-3xl font-bold text-white flex items-center gap-3">
-                Takeaway Orders
-                <span className="bg-orange-600/20 text-orange-400 text-xs md:text-sm py-1 px-3 rounded-full border border-orange-500/20">
-                  {takeawayOrders.filter(o => o.status !== 'done' && o.status !== 'cancelled').length} Active
-                </span>
-              </h1>
+          <div className="max-w-6xl mx-auto">
+
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+              <div>
+                <h1 className="text-xl md:text-2xl font-bold text-white">Takeaway Orders</h1>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {takeawayOrders.filter(o => o.status !== 'done' && o.status !== 'cancelled').length} active orders
+                </p>
+              </div>
               <button
-                onClick={() => setShowTakeawayForm(true)}
-                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-4 py-2.5 rounded-xl text-sm transition-colors"
+                onClick={() => { setShowTakeawayForm(true); setTwStep(1); if (menuItems.length === 0) fetchMenuItems() }}
+                className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 active:bg-orange-800 text-white font-bold px-4 py-2.5 rounded-xl text-sm transition-colors shadow-lg shadow-orange-600/20"
               >
-                <Plus className="w-4 h-4" /> New Takeaway Order
+                <Plus className="w-4 h-4" />
+                <span className="hidden sm:inline">New Order</span>
+                <span className="sm:hidden">New</span>
               </button>
             </div>
 
-            {/* Active takeaway orders */}
-            
+            {/* Empty state */}
             {takeawayOrders.length === 0 ? (
-              <div className="bg-slate-900 p-12 rounded-2xl border border-slate-800 text-center">
-                <Package className="w-12 h-12 text-slate-700 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-slate-300 mb-2">No takeaway orders</h3>
-                <p className="text-slate-500 text-sm">Click "New Takeaway Order" to create one.</p>
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-20 h-20 rounded-3xl bg-slate-800 border border-slate-700 flex items-center justify-center mb-4">
+                  <Package className="w-9 h-9 text-slate-600" />
+                </div>
+                <h3 className="text-base font-semibold text-slate-300 mb-1">No takeaway orders yet</h3>
+                <p className="text-slate-500 text-sm mb-5">Tap "New Order" to place a takeaway order</p>
+                <button
+                  onClick={() => { setShowTakeawayForm(true); setTwStep(1); if (menuItems.length === 0) fetchMenuItems() }}
+                  className="flex items-center gap-2 bg-orange-600 hover:bg-orange-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> New Takeaway Order
+                </button>
               </div>
             ) : (
-              <div className="space-y-3">
-                {takeawayOrders.map(order => {
-                  const statusConfig: Record<string, { label: string; color: string; next: string; nextLabel: string }> = {
-                    new:       { label: 'Received',   color: 'bg-sky-500/10 text-sky-400 border-sky-500/20',     next: 'preparing', nextLabel: 'Start Preparing' },
-                    preparing: { label: 'Preparing',  color: 'bg-amber-500/10 text-amber-400 border-amber-500/20', next: 'ready',    nextLabel: 'Mark Ready' },
-                    ready:     { label: 'Ready',      color: 'bg-green-500/10 text-green-400 border-green-500/20', next: 'done',     nextLabel: 'Mark Picked Up' },
-                    done:      { label: 'Picked Up',  color: 'bg-slate-500/10 text-slate-400 border-slate-500/20', next: '',         nextLabel: '' },
-                    cancelled: { label: 'Cancelled',  color: 'bg-red-500/10 text-red-400 border-red-500/20',       next: '',         nextLabel: '' },
-                  }
-                  const cfg = statusConfig[order.status] ?? statusConfig.new
-                  return (
-                    <div key={order.id} className="bg-slate-900 rounded-2xl border border-slate-800 p-4">
-                      <div className="flex items-start justify-between gap-3 mb-3">
-                        <div>
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <p className="font-bold text-white text-base">{order.customer_name}</p>
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${cfg.color}`}>{cfg.label}</span>
+              <>
+                {/* ── Mobile: vertical list ── Desktop: Kanban columns ── */}
+
+                {/* Desktop Kanban */}
+                <div className="hidden md:grid grid-cols-4 gap-4">
+                  {(['new','preparing','ready','done'] as const).map(colStatus => {
+                    const colConfig = {
+                      new:       { label: 'Received',  color: 'text-sky-400',   bg: 'bg-sky-500/10',   border: 'border-sky-500/20',   dot: 'bg-sky-400'   },
+                      preparing: { label: 'Preparing', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', dot: 'bg-amber-400' },
+                      ready:     { label: 'Ready',     color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', dot: 'bg-green-400' },
+                      done:      { label: 'Picked Up', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', dot: 'bg-slate-400' },
+                    }
+                    const col = colConfig[colStatus]
+                    const colOrders = takeawayOrders.filter(o => o.status === colStatus)
+                    return (
+                      <div key={colStatus} className="flex flex-col gap-3">
+                        {/* Column header */}
+                        <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${col.bg} border ${col.border}`}>
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${col.dot} ${colStatus === 'preparing' ? 'animate-pulse' : ''}`} />
+                            <span className={`text-xs font-bold ${col.color}`}>{col.label}</span>
                           </div>
-                          <p className="text-xs text-slate-400 flex items-center gap-1">{order.phone} · <Clock className="w-3 h-3 inline" /> Pickup: {order.pickup_time}</p>
-                          {order.notes && <p className="text-xs text-amber-400 mt-0.5 italic">📝 {order.notes}</p>}
+                          <span className={`text-xs font-black ${col.color}`}>{colOrders.length}</span>
                         </div>
-                        <p className="text-orange-400 font-bold text-base shrink-0">₹{order.total_amount}</p>
+
+                        {/* Cards */}
+                        <div className="flex flex-col gap-3 min-h-[120px]">
+                          {colOrders.length === 0 && (
+                            <div className="border-2 border-dashed border-slate-800 rounded-2xl h-24 flex items-center justify-center">
+                              <p className="text-xs text-slate-700">Empty</p>
+                            </div>
+                          )}
+                          {colOrders.map(order => (
+                            <TakeawayCard key={order.id} order={order} onUpdate={async (nextStatus: string) => {
+                              await supabase.from('takeaway_orders').update({ status: nextStatus }).eq('id', order.id)
+                              fetchTakeawayOrders()
+                            }} />
+                          ))}
+                        </div>
                       </div>
-                      <div className="space-y-1 mb-3 pl-1">
-                        {(order.items || []).map((item: any, i: number) => (
-                          <p key={i} className="text-xs text-slate-400">{item.qty}× {item.name} <span className="text-slate-600">₹{item.price * item.qty}</span></p>
+                    )
+                  })}
+                </div>
+
+                {/* Mobile: vertical list grouped by status */}
+                <div className="md:hidden space-y-6">
+                  {(['new','preparing','ready','done'] as const).map(colStatus => {
+                    const colOrders = takeawayOrders.filter(o => o.status === colStatus)
+                    if (colOrders.length === 0) return null
+                    const labels: Record<string,string> = { new: 'Received', preparing: 'Preparing', ready: 'Ready to Pick Up', done: 'Picked Up' }
+                    const colors: Record<string,string> = { new: 'text-sky-400', preparing: 'text-amber-400 animate-pulse', ready: 'text-green-400', done: 'text-slate-500' }
+                    return (
+                      <div key={colStatus}>
+                        <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${colors[colStatus]}`}>
+                          {labels[colStatus]} ({colOrders.length})
+                        </p>
+                        <div className="space-y-3">
+                          {colOrders.map(order => (
+                            <TakeawayCard key={order.id} order={order} onUpdate={async (nextStatus: string) => {
+                              await supabase.from('takeaway_orders').update({ status: nextStatus }).eq('id', order.id)
+                              fetchTakeawayOrders()
+                            }} />
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {/* Show cancelled separately at bottom */}
+                  {takeawayOrders.filter(o => o.status === 'cancelled').length > 0 && (
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest mb-2 text-red-500">
+                        Cancelled ({takeawayOrders.filter(o => o.status === 'cancelled').length})
+                      </p>
+                      <div className="space-y-2">
+                        {takeawayOrders.filter(o => o.status === 'cancelled').map(order => (
+                          <div key={order.id} className="bg-slate-900 border border-red-900/30 rounded-2xl px-4 py-3 opacity-60">
+                            <div className="flex justify-between items-center">
+                              <p className="text-sm font-semibold text-slate-400">{order.customer_name}</p>
+                              <p className="text-sm text-slate-500">₹{order.total_amount}</p>
+                            </div>
+                          </div>
                         ))}
                       </div>
-                      {cfg.next && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={async () => {
-                              await supabase.from('takeaway_orders').update({ status: cfg.next }).eq('id', order.id)
-                              fetchTakeawayOrders()
-                            }}
-                            className="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm py-2 rounded-xl transition-colors"
-                          >
-                            {cfg.nextLabel}
-                          </button>
-                          <button
-                            onClick={async () => {
-                              await supabase.from('takeaway_orders').update({ status: 'cancelled' }).eq('id', order.id)
-                              fetchTakeawayOrders()
-                            }}
-                            className="bg-red-500/10 hover:bg-red-500/20 text-red-400 font-bold text-sm py-2 px-4 rounded-xl border border-red-500/20 transition-colors"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      )}
                     </div>
-                  )
-                })}
-              </div>
+                  )}
+                </div>
+              </>
             )}
           </div>
         )}
@@ -2772,17 +2737,11 @@ export default function AdminDashboard() {
                           <Switch
                             checked={member.present_today}
                             onCheckedChange={async (val) => {
-                              await markAttendance(member.id, todayStr(), val ? 'present' : 'absent')
+                              await supabase.from('staff').update({ present_today: val }).eq('id', member.id)
+                              fetchStaff()
                             }}
                           />
                         </div>
-                        <button
-                          onClick={() => openAttendance(member)}
-                          className="p-2 text-slate-500 hover:text-orange-400 hover:bg-orange-500/10 rounded-xl transition-colors"
-                          title="View attendance history"
-                        >
-                          <CalendarDays className="w-4 h-4" />
-                        </button>
                         <button
                           onClick={async () => {
                             if (!window.confirm(`Remove ${member.name} from staff?`)) return
@@ -2809,173 +2768,199 @@ export default function AdminDashboard() {
 
       {/* ── TAKEAWAY ORDER FORM MODAL ─────────────────────────────────────── */}
       {showTakeawayForm && (
-        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setShowTakeawayForm(false)}>
-          <div className="bg-slate-900 w-full max-w-lg rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" style={{ maxHeight: '90dvh' }} onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => { setShowTakeawayForm(false); setTwStep(1); setTwPickingItem(null) }}>
+          <div className="bg-slate-900 w-full max-w-lg rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" style={{ maxHeight: '92dvh' }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
-              <h2 className="text-lg font-bold text-white">New Takeaway Order</h2>
-              <button onClick={() => setShowTakeawayForm(false)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="overflow-y-auto flex-1 p-5 space-y-4">
-              {/* Customer info */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex items-center gap-3">
+                {twStep > 1 && !twPickingItem && (
+                  <button onClick={() => setTwStep(s => (s - 1) as 1|2|3)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/></svg>
+                  </button>
+                )}
                 <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Customer Name *</label>
-                  <input value={twCustomer} onChange={e => setTwCustomer(e.target.value)} placeholder="Name" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Phone</label>
-                  <input value={twPhone} onChange={e => setTwPhone(e.target.value)} placeholder="+91 XXXXX" type="tel" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
+                  <h2 className="text-base font-bold text-white">
+                    {twStep === 1 ? 'Customer Details' : twStep === 2 ? 'Add Items' : 'Review Order'}
+                  </h2>
+                  <p className="text-xs text-slate-500">Step {twStep} of 3</p>
                 </div>
               </div>
+              <button onClick={() => { setShowTakeawayForm(false); setTwStep(1); setTwPickingItem(null) }} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-              {/* Pickup Time — ASAP or exact clock time */}
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Pickup Time</label>
-                <div className="flex gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setTwPickupMode('asap')}
-                    className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
-                      twPickupMode === 'asap'
-                        ? 'bg-orange-600 border-orange-600 text-white'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
-                    }`}
-                  >
-                    ASAP
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTwPickupMode('custom')}
-                    className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors ${
-                      twPickupMode === 'custom'
-                        ? 'bg-orange-600 border-orange-600 text-white'
-                        : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
-                    }`}
-                  >
-                    <Clock className="w-4 h-4" /> Pick Exact Time
-                  </button>
+            {/* Step indicator */}
+            <div className="flex gap-1.5 px-5 pt-3 pb-1 shrink-0">
+              {[1,2,3].map(s => (
+                <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-300 ${twStep >= s ? 'bg-orange-500' : 'bg-slate-700'}`} />
+              ))}
+            </div>
+
+            {/* ── STEP 1: Customer details + time ── */}
+            {twStep === 1 && (
+              <div className="flex-1 overflow-y-auto px-5 pt-4 pb-5 space-y-5">
+                {/* Name + Phone */}
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Customer Name *</label>
+                    <input
+                      value={twCustomer}
+                      onChange={e => setTwCustomer(e.target.value)}
+                      placeholder="Enter name"
+                      autoFocus
+                      className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Phone Number</label>
+                    <input
+                      value={twPhone}
+                      onChange={e => setTwPhone(e.target.value)}
+                      placeholder="+91 98765 43210"
+                      type="tel"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
+                    />
+                  </div>
                 </div>
-                {twPickupMode === 'custom' && (
+
+                {/* Pickup Time — clock-style native time picker */}
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Pickup Time</label>
                   <div className="relative">
-                    <Clock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                    {/* Clock icon */}
+                    <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 7v5l3 3"/>
+                    </svg>
                     <input
                       type="time"
-                      value={twPickupTime}
-                      onChange={e => setTwPickupTime(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3 py-3 text-sm text-white focus:outline-none focus:border-orange-500 [color-scheme:dark]"
+                      value={twPickup}
+                      onChange={e => setTwPickup(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-base font-bold text-white focus:outline-none focus:border-orange-500 transition-colors appearance-none [color-scheme:dark]"
                     />
+                    {/* Quick time chips */}
                   </div>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 block">Notes</label>
-                <input value={twNotes} onChange={e => setTwNotes(e.target.value)} placeholder="Special instructions" className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500" />
-              </div>
-
-              {/* ── MENU ITEM PICKER ── */}
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Add Items *</label>
-
-                {/* Category filter + search */}
-                {!twPickingItem && (
-                  <div className="sticky top-0 z-10 bg-slate-900 pb-2 -mx-0">
-                    <input
-                      value={twMenuSearch}
-                      onChange={e => setTwMenuSearch(e.target.value)}
-                      placeholder="Search menu…"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 mb-2"
-                    />
-                    {/* Category chips */}
+                  <div className="flex gap-2 mt-2 flex-wrap">
                     {(() => {
-                      const cats = ['All', ...Array.from(new Set(menuItems.map((m: any) => m.category).filter(Boolean)))]
-                      return (
-                        <div className="flex gap-1.5 overflow-x-auto pb-1 mb-2 no-scrollbar">
-                          {cats.map(cat => (
-                            <button
-                              key={cat}
-                              onClick={() => setTwMenuCategory(cat)}
-                              className={`text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap shrink-0 transition-colors ${
-                                twMenuCategory === cat
-                                  ? 'bg-orange-600 text-white'
-                                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                              }`}
-                            >
-                              {cat}
-                            </button>
-                          ))}
-                        </div>
-                      )
+                      const now = new Date()
+                      return [15, 30, 45, 60].map(mins => {
+                        const t = new Date(now.getTime() + mins * 60000)
+                        const hh = String(t.getHours()).padStart(2,'0')
+                        const mm = String(t.getMinutes()).padStart(2,'0')
+                        const display = t.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+                        return (
+                          <button
+                            key={mins}
+                            onClick={() => setTwPickup(`${hh}:${mm}`)}
+                            className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors border ${
+                              twPickup === `${hh}:${mm}`
+                                ? 'bg-orange-600 border-orange-500 text-white'
+                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
+                            }`}
+                          >
+                            +{mins}m · {display}
+                          </button>
+                        )
+                      })
                     })()}
                   </div>
-                )}
+                </div>
 
-                {/* ── Sub-picker: when an item is tapped, show its variants + addons ── */}
+                {/* Notes */}
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Special Instructions</label>
+                  <textarea
+                    value={twNotes}
+                    onChange={e => setTwNotes(e.target.value)}
+                    placeholder="e.g. Less spicy, extra sauce…"
+                    rows={2}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors resize-none"
+                  />
+                </div>
+
+                <button
+                  disabled={!twCustomer.trim()}
+                  onClick={() => setTwStep(2)}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold py-3.5 rounded-2xl text-sm transition-colors"
+                >
+                  Next — Choose Items →
+                </button>
+              </div>
+            )}
+
+            {/* ── STEP 2: Menu picker ── */}
+            {twStep === 2 && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+
+                {/* Item configurator — fullscreen within modal */}
                 {twPickingItem ? (
-                  <div className="bg-slate-800 rounded-2xl border border-orange-500/30 p-4 space-y-4">
-                    {/* Header */}
+                  <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="font-bold text-white text-sm">{twPickingItem.name}</p>
+                        <p className="font-bold text-white">{twPickingItem.name}</p>
                         <p className="text-xs text-slate-400">{twPickingItem.category}</p>
                       </div>
-                      <button onClick={() => { setTwPickingItem(null); setTwPickVariant(null); setTwPickAddons(new Set()); setTwPickQty(1) }} className="text-slate-500 hover:text-white transition-colors text-xs">✕ Cancel</button>
+                      <button
+                        onClick={() => { setTwPickingItem(null); setTwPickVariant(null); setTwPickAddons(new Set()); setTwPickQty(1) }}
+                        className="text-xs text-slate-400 hover:text-white bg-slate-800 px-3 py-1.5 rounded-xl transition-colors"
+                      >
+                        ← Back
+                      </button>
                     </div>
 
-                    {/* Variants — if item has them */}
+                    {/* Variants */}
                     {Array.isArray(twPickingItem.variants) && twPickingItem.variants.length > 0 && (
                       <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Size / Portion <span className="text-red-400">*</span></p>
-                        <div className="space-y-1.5">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                          Size / Portion <span className="text-red-400">*</span>
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
                           {twPickingItem.variants.map((v: any) => (
                             <button
                               key={v.name}
                               onClick={() => setTwPickVariant(v)}
-                              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-left transition-all ${
+                              className={`flex flex-col items-center py-3 px-2 rounded-2xl border transition-all ${
                                 twPickVariant?.name === v.name
-                                  ? 'border-orange-500 bg-orange-600/10'
-                                  : 'border-slate-700 bg-slate-700/40 hover:border-slate-500'
+                                  ? 'border-orange-500 bg-orange-600/15'
+                                  : 'border-slate-700 bg-slate-800 hover:border-slate-500'
                               }`}
                             >
-                              <div className="flex items-center gap-2">
-                                <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${twPickVariant?.name === v.name ? 'border-orange-500' : 'border-slate-500'}`}>
-                                  {twPickVariant?.name === v.name && <div className="w-2 h-2 rounded-full bg-orange-500" />}
-                                </div>
-                                <span className="text-sm text-white font-medium">{v.name}</span>
+                              <div className={`w-4 h-4 rounded-full border-2 mb-2 flex items-center justify-center ${twPickVariant?.name === v.name ? 'border-orange-500' : 'border-slate-500'}`}>
+                                {twPickVariant?.name === v.name && <div className="w-2 h-2 rounded-full bg-orange-500" />}
                               </div>
-                              <span className="text-sm font-bold text-orange-400">₹{v.price}</span>
+                              <span className="text-sm font-semibold text-white">{v.name}</span>
+                              <span className="text-sm font-black text-orange-400 mt-0.5">₹{v.price}</span>
                             </button>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {/* Add-ons — if item has them */}
+                    {/* Add-ons */}
                     {Array.isArray(twPickingItem.addons) && twPickingItem.addons.length > 0 && (
                       <div>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Add Extras <span className="text-slate-600">(optional)</span></p>
-                        <div className="space-y-1.5">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+                          Add Extras <span className="text-slate-600 normal-case font-normal">(optional)</span>
+                        </p>
+                        <div className="space-y-2">
                           {twPickingItem.addons.map((a: any) => {
                             const sel = twPickAddons.has(a.name)
                             return (
                               <button
                                 key={a.name}
-                                onClick={() => setTwPickAddons(prev => {
-                                  const next = new Set(prev)
-                                  sel ? next.delete(a.name) : next.add(a.name)
-                                  return next
-                                })}
-                                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-left transition-all ${
-                                  sel ? 'border-orange-500 bg-orange-600/10' : 'border-slate-700 bg-slate-700/40 hover:border-slate-500'
+                                onClick={() => setTwPickAddons(prev => { const n = new Set(prev); sel ? n.delete(a.name) : n.add(a.name); return n })}
+                                className={`w-full flex items-center justify-between px-4 py-3 rounded-2xl border text-left transition-all ${
+                                  sel ? 'border-orange-500 bg-orange-600/10' : 'border-slate-700 bg-slate-800 hover:border-slate-500'
                                 }`}
                               >
-                                <div className="flex items-center gap-2">
-                                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${sel ? 'border-orange-500 bg-orange-500' : 'border-slate-500'}`}>
-                                    {sel && <span className="text-white text-[10px] font-black">✓</span>}
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${sel ? 'border-orange-500 bg-orange-500' : 'border-slate-500'}`}>
+                                    {sel && <span className="text-white text-xs font-black">✓</span>}
                                   </div>
                                   <span className="text-sm text-white font-medium">{a.name}</span>
                                 </div>
-                                <span className="text-sm text-slate-400">+ ₹{a.price}</span>
+                                <span className="text-sm text-slate-400 font-semibold">+ ₹{a.price}</span>
                               </button>
                             )
                           })}
@@ -2983,236 +2968,210 @@ export default function AdminDashboard() {
                       </div>
                     )}
 
-                    {/* Quantity + Add button */}
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-2 bg-slate-700 rounded-xl px-3 py-2">
-                        <button onClick={() => setTwPickQty(q => Math.max(1, q - 1))} className="w-6 h-6 flex items-center justify-center text-orange-400 font-bold"><Minus className="w-3.5 h-3.5" /></button>
-                        <span className="text-white font-bold text-sm w-5 text-center">{twPickQty}</span>
-                        <button onClick={() => setTwPickQty(q => q + 1)} className="w-6 h-6 flex items-center justify-center text-orange-400 font-bold"><Plus className="w-3.5 h-3.5" /></button>
+                    {/* Qty + CTA */}
+                    <div className="flex items-center gap-3 pt-2">
+                      <div className="flex items-center gap-3 bg-slate-800 rounded-2xl px-4 py-3 border border-slate-700">
+                        <button onClick={() => setTwPickQty(q => Math.max(1, q - 1))} className="text-orange-400"><Minus className="w-4 h-4" /></button>
+                        <span className="text-white font-black text-lg w-6 text-center">{twPickQty}</span>
+                        <button onClick={() => setTwPickQty(q => q + 1)} className="text-orange-400"><Plus className="w-4 h-4" /></button>
                       </div>
                       <button
                         disabled={Array.isArray(twPickingItem.variants) && twPickingItem.variants.length > 0 && !twPickVariant}
                         onClick={() => {
-                          const basePrice = twPickVariant ? twPickVariant.price : twPickingItem.price
-                          const addonsArr = twPickingItem.addons?.filter((a: any) => twPickAddons.has(a.name)) || []
+                          const basePrice   = twPickVariant ? twPickVariant.price : twPickingItem.price
+                          const addonsArr   = twPickingItem.addons?.filter((a: any) => twPickAddons.has(a.name)) || []
                           const addonsTotal = addonsArr.reduce((s: number, a: any) => s + a.price, 0)
-                          const finalPrice = basePrice + addonsTotal
+                          const finalPrice  = basePrice + addonsTotal
                           const variantLabel = twPickVariant?.name || ''
-                          const addonsLabel = addonsArr.map((a: any) => a.name).join(', ')
-                          // Unique key: item name + variant + addons combo
+                          const addonsLabel  = addonsArr.map((a: any) => a.name).join(', ')
                           const key = `${twPickingItem.name}|${variantLabel}|${addonsLabel}`
                           setTwItems(prev => {
-                            const existing = prev.find(i => `${i.name}|${i.variantLabel}|${i.addons}` === key)
-                            if (existing) {
-                              return prev.map(i => `${i.name}|${i.variantLabel}|${i.addons}` === key
-                                ? { ...i, qty: i.qty + twPickQty } : i)
-                            }
+                            const ex = prev.find(i => `${i.name}|${i.variantLabel}|${i.addons}` === key)
+                            if (ex) return prev.map(i => `${i.name}|${i.variantLabel}|${i.addons}` === key ? { ...i, qty: i.qty + twPickQty } : i)
                             return [...prev, { name: twPickingItem.name, price: finalPrice, qty: twPickQty, variantLabel, addons: addonsLabel }]
                           })
                           setTwPickingItem(null); setTwPickVariant(null); setTwPickAddons(new Set()); setTwPickQty(1)
                         }}
-                        className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold text-sm py-2.5 rounded-xl transition-colors"
+                        className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold py-3.5 rounded-2xl text-sm transition-colors"
                       >
                         {(() => {
-                          const basePrice = twPickVariant ? twPickVariant.price : twPickingItem.price
-                          const addonsTotal = twPickingItem.addons?.filter((a: any) => twPickAddons.has(a.name)).reduce((s: number, a: any) => s + a.price, 0) || 0
-                          return `Add to Order — ₹${(basePrice + addonsTotal) * twPickQty}`
+                          const bp = twPickVariant ? twPickVariant.price : twPickingItem.price
+                          const at = twPickingItem.addons?.filter((a: any) => twPickAddons.has(a.name)).reduce((s: number, a: any) => s + a.price, 0) || 0
+                          return `Add — ₹${(bp + at) * twPickQty}`
                         })()}
                       </button>
                     </div>
                   </div>
                 ) : (
-                  /* ── Menu item list ── */
-                  <div className="max-h-64 sm:max-h-72 overflow-y-auto space-y-1 bg-slate-800/50 rounded-xl p-2">
-                    {menuItems.length === 0 && <p className="text-slate-500 text-xs text-center py-3">Loading menu…</p>}
-                    {menuItems
-                      .filter((mi: any) =>
-                        (twMenuCategory === 'All' || mi.category === twMenuCategory) &&
-                        (!twMenuSearch || mi.name.toLowerCase().includes(twMenuSearch.toLowerCase()))
-                      )
-                      .map((mi: any) => {
-                        const cartCount = twItems.filter(i => i.name === mi.name).reduce((s, i) => s + i.qty, 0)
-                        const hasVariants = Array.isArray(mi.variants) && mi.variants.length > 0
-                        const hasAddons   = Array.isArray(mi.addons)   && mi.addons.length > 0
-                        return (
-                          <div key={mi.id} className="flex items-center justify-between px-3 py-3 rounded-xl hover:bg-slate-700 active:bg-slate-700 transition-colors cursor-pointer" onClick={() => { setTwPickingItem(mi); setTwPickQty(1); setTwPickVariant(null); setTwPickAddons(new Set()) }}>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm text-white font-semibold truncate">{mi.name}</p>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <p className="text-xs text-orange-400 font-bold">
-                                  {hasVariants ? `₹${mi.variants[0].price}+` : `₹${mi.price}`}
-                                </p>
-                                {hasVariants && <span className="text-[10px] bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded-full">{mi.variants.length} sizes</span>}
-                                {hasAddons   && <span className="text-[10px] bg-slate-600 text-slate-300 px-1.5 py-0.5 rounded-full">{mi.addons.length} extras</span>}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {cartCount > 0 && (
-                                <span className="bg-orange-600 text-white text-xs font-black px-2 py-0.5 rounded-full">{cartCount}</span>
-                              )}
-                              <span className="text-xs text-orange-500 font-bold">+ Add</span>
-                            </div>
-                          </div>
+                  /* Menu list with search + category */
+                  <>
+                    <div className="px-4 pt-3 pb-2 space-y-2 shrink-0">
+                      <div className="relative">
+                        <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="11" cy="11" r="8"/><path strokeLinecap="round" d="M21 21l-4.35-4.35"/></svg>
+                        <input
+                          value={twMenuSearch}
+                          onChange={e => setTwMenuSearch(e.target.value)}
+                          placeholder="Search dishes…"
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500"
+                        />
+                      </div>
+                      <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+                        {['All', ...Array.from(new Set(menuItems.map((m: any) => m.category).filter(Boolean)))].map(cat => (
+                          <button
+                            key={cat}
+                            onClick={() => setTwMenuCategory(cat)}
+                            className={`text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap shrink-0 transition-colors ${
+                              twMenuCategory === cat ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500'
+                            }`}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-2">
+                      {menuItems.length === 0 && (
+                        <p className="text-center text-slate-500 text-sm py-8">Loading menu…</p>
+                      )}
+                      {menuItems
+                        .filter((mi: any) =>
+                          (twMenuCategory === 'All' || mi.category === twMenuCategory) &&
+                          (!twMenuSearch || mi.name.toLowerCase().includes(twMenuSearch.toLowerCase()))
                         )
-                      })
-                    }
-                  </div>
+                        .map((mi: any) => {
+                          const cartQty    = twItems.filter(i => i.name === mi.name).reduce((s, i) => s + i.qty, 0)
+                          const hasVariants = Array.isArray(mi.variants) && mi.variants.length > 0
+                          const hasAddons   = Array.isArray(mi.addons)   && mi.addons.length > 0
+                          return (
+                            <button
+                              key={mi.id}
+                              onClick={() => { setTwPickingItem(mi); setTwPickQty(1); setTwPickVariant(null); setTwPickAddons(new Set()) }}
+                              className="w-full flex items-center justify-between bg-slate-800 hover:bg-slate-700 active:bg-slate-700 rounded-2xl px-4 py-3.5 border border-slate-700 transition-colors text-left"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-white truncate">{mi.name}</p>
+                                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                  <p className="text-xs font-bold text-orange-400">
+                                    {hasVariants ? `from ₹${mi.variants[0].price}` : `₹${mi.price}`}
+                                  </p>
+                                  {hasVariants && <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full">{mi.variants.length} sizes</span>}
+                                  {hasAddons   && <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full">{mi.addons.length} extras</span>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0 ml-2">
+                                {cartQty > 0 && (
+                                  <span className="bg-orange-600 text-white text-xs font-black px-2 py-0.5 rounded-full min-w-[20px] text-center">{cartQty}</span>
+                                )}
+                                <div className="w-7 h-7 rounded-full bg-orange-600/20 border border-orange-500/40 flex items-center justify-center">
+                                  <Plus className="w-3.5 h-3.5 text-orange-400" />
+                                </div>
+                              </div>
+                            </button>
+                          )
+                        })
+                      }
+                    </div>
+
+                    {/* Bottom CTA */}
+                    <div className="px-4 pb-4 pt-2 border-t border-slate-800 shrink-0">
+                      <button
+                        disabled={twItems.length === 0}
+                        onClick={() => setTwStep(3)}
+                        className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold py-3.5 rounded-2xl text-sm transition-colors flex items-center justify-between px-5"
+                      >
+                        <span>Review Order →</span>
+                        {twItems.length > 0 && (
+                          <span className="bg-white/20 px-2.5 py-0.5 rounded-full text-xs font-black">
+                            {twItems.reduce((s, i) => s + i.qty, 0)} items · ₹{twItems.reduce((s, i) => s + i.price * i.qty, 0)}
+                          </span>
+                        )}
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
+            )}
 
-              {/* Order summary */}
-              {twItems.length > 0 && (
-                <div className="bg-slate-800 rounded-xl p-3 space-y-2">
-                  <p className="text-xs font-bold text-slate-400 uppercase mb-2">Order Summary</p>
-                  {twItems.map((item, i) => (
-                    <div key={i} className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-sm text-slate-200">{item.qty}× {item.name}</span>
-                          {item.variantLabel && <span className="text-[10px] bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded-full shrink-0">{item.variantLabel}</span>}
+            {/* ── STEP 3: Review + confirm ── */}
+            {twStep === 3 && (
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+                {/* Customer summary */}
+                <div className="bg-slate-800 rounded-2xl p-4 space-y-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Customer</p>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-400">Name</span>
+                    <span className="text-white font-semibold">{twCustomer}</span>
+                  </div>
+                  {twPhone && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-slate-400">Phone</span>
+                      <span className="text-white">{twPhone}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-400">Pickup</span>
+                    <span className="text-white font-semibold">
+                      {twPickup ? (() => {
+                        const [h, m] = twPickup.split(':')
+                        const d = new Date(); d.setHours(+h, +m)
+                        return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+                      })() : 'ASAP'}
+                    </span>
+                  </div>
+                  {twNotes && (
+                    <div className="flex items-start justify-between text-sm gap-4">
+                      <span className="text-slate-400 shrink-0">Note</span>
+                      <span className="text-amber-400 text-right">{twNotes}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Items */}
+                <div className="bg-slate-800 rounded-2xl p-4">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Items</p>
+                  <div className="space-y-3">
+                    {twItems.map((item, i) => (
+                      <div key={i} className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white font-medium">
+                            {item.qty}× {item.name}
+                            {item.variantLabel && <span className="text-xs text-slate-400 ml-1">({item.variantLabel})</span>}
+                          </p>
+                          {item.addons && <p className="text-xs text-orange-400 mt-0.5">+ {item.addons}</p>}
                         </div>
-                        {item.addons && <p className="text-xs text-orange-400 mt-0.5">+ {item.addons}</p>}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-slate-400 text-sm">₹{item.price * item.qty}</span>
-                        <button
-                          onClick={() => setTwItems(prev => prev.filter((_, idx) => idx !== i))}
-                          className="text-slate-600 hover:text-red-400 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="border-t border-slate-700 pt-2 mt-1 flex justify-between font-bold">
-                    <span className="text-white">Total</span>
-                    <span className="text-orange-400">₹{twItems.reduce((s, i) => s + i.price * i.qty, 0)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="px-5 py-4 border-t border-slate-800 shrink-0">
-              <Button
-                disabled={!twCustomer.trim() || twItems.length === 0 || twSaving}
-                onClick={saveTakeawayOrder}
-                className="w-full bg-orange-600 hover:bg-orange-700 font-bold h-12 disabled:opacity-40"
-              >
-                {twSaving ? 'Placing Order…' : `Place Takeaway Order${twItems.length > 0 ? ` — ₹${twItems.reduce((s, i) => s + i.price * i.qty, 0)}` : ''}`}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── STAFF ATTENDANCE CALENDAR MODAL ─────────────────────────────────── */}
-      {attendanceStaff && (
-        <div className="fixed inset-0 z-[9998] flex items-end md:items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setAttendanceStaff(null)}>
-          <div className="bg-slate-900 w-full max-w-md rounded-t-3xl md:rounded-2xl border border-slate-700 shadow-2xl flex flex-col" style={{ maxHeight: '90dvh' }} onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
-              <div>
-                <h2 className="text-lg font-bold text-white">{attendanceStaff.name}</h2>
-                <p className="text-xs text-slate-500">Attendance history</p>
-              </div>
-              <button onClick={() => setAttendanceStaff(null)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors"><X className="w-4 h-4" /></button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 p-5">
-              {/* Month navigation */}
-              <div className="flex items-center justify-between mb-4">
-                <button onClick={() => changeAttendanceMonth(-1)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors">‹</button>
-                <p className="text-sm font-bold text-white">
-                  {new Date(attendanceMonth.year, attendanceMonth.month).toLocaleString('en-US', { month: 'long', year: 'numeric' })}
-                </p>
-                <button onClick={() => changeAttendanceMonth(1)} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-300 transition-colors">›</button>
-              </div>
-
-              {/* Monthly summary */}
-              {(() => {
-                const presentCount = attendanceRecords.filter(r => r.status === 'present').length
-                const absentCount  = attendanceRecords.filter(r => r.status === 'absent').length
-                const halfDayCount = attendanceRecords.filter(r => r.status === 'half_day').length
-                const leaveCount   = attendanceRecords.filter(r => r.status === 'leave').length
-                return (
-                  <div className="grid grid-cols-4 gap-2 mb-4">
-                    <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-lg p-2 text-center">
-                      <p className="text-base font-bold text-emerald-400">{presentCount}</p>
-                      <p className="text-[10px] text-slate-500">Present</p>
-                    </div>
-                    <div className="bg-red-950/30 border border-red-800/40 rounded-lg p-2 text-center">
-                      <p className="text-base font-bold text-red-400">{absentCount}</p>
-                      <p className="text-[10px] text-slate-500">Absent</p>
-                    </div>
-                    <div className="bg-amber-950/30 border border-amber-800/40 rounded-lg p-2 text-center">
-                      <p className="text-base font-bold text-amber-400">{halfDayCount}</p>
-                      <p className="text-[10px] text-slate-500">Half Day</p>
-                    </div>
-                    <div className="bg-sky-950/30 border border-sky-800/40 rounded-lg p-2 text-center">
-                      <p className="text-base font-bold text-sky-400">{leaveCount}</p>
-                      <p className="text-[10px] text-slate-500">Leave</p>
-                    </div>
-                  </div>
-                )
-              })()}
-
-              {/* Legend */}
-              <div className="flex items-center gap-3 mb-3 text-[10px] text-slate-500 flex-wrap">
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Present</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-red-500 inline-block" /> Absent</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" /> Half Day</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block" /> Leave</span>
-                <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-sm bg-slate-700 inline-block" /> Not marked</span>
-              </div>
-              <p className="text-[10px] text-slate-600 mb-3">Tap a date to cycle: Present → Absent → Half Day → Leave → clear</p>
-
-              {/* Calendar grid */}
-              {attendanceLoading ? (
-                <div className="text-center py-10 text-slate-500 text-sm">Loading…</div>
-              ) : (
-                <div>
-                  <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[10px] text-slate-600 font-bold">
-                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i}>{d}</div>)}
-                  </div>
-                  <div className="grid grid-cols-7 gap-1">
-                    {(() => {
-                      const { year, month } = attendanceMonth
-                      const firstDow = new Date(year, month, 1).getDay()
-                      const daysInMonth = new Date(year, month + 1, 0).getDate()
-                      const today = todayStr()
-                      const cells = []
-                      for (let i = 0; i < firstDow; i++) cells.push(<div key={`empty-${i}`} />)
-                      for (let day = 1; day <= daysInMonth; day++) {
-                        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-                        const record = attendanceRecords.find(r => r.date === dateStr)
-                        const isFuture = dateStr > today
-                        const isToday = dateStr === today
-                        const statusColor =
-                          record?.status === 'present'  ? 'bg-emerald-500 text-white' :
-                          record?.status === 'absent'   ? 'bg-red-500 text-white' :
-                          record?.status === 'half_day' ? 'bg-amber-500 text-white' :
-                          record?.status === 'leave'    ? 'bg-sky-500 text-white' :
-                          'bg-slate-800 text-slate-400'
-                        const nextStatus = (cur: string | undefined) =>
-                          cur === undefined ? 'present' :
-                          cur === 'present' ? 'absent' :
-                          cur === 'absent' ? 'half_day' :
-                          cur === 'half_day' ? 'leave' : null // leave -> clear
-                        cells.push(
-                          <button
-                            key={dateStr}
-                            disabled={isFuture || markingDate === dateStr}
-                            onClick={() => markAttendance(attendanceStaff.id, dateStr, nextStatus(record?.status))}
-                            className={`aspect-square rounded-lg text-xs font-semibold flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed ${statusColor} ${isToday ? 'ring-2 ring-orange-400' : ''} ${markingDate === dateStr ? 'opacity-50' : 'hover:opacity-80'}`}
-                          >
-                            {day}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-sm font-semibold text-slate-300">₹{item.price * item.qty}</span>
+                          <button onClick={() => setTwItems(prev => prev.filter((_, idx) => idx !== i))} className="text-slate-600 hover:text-red-400 transition-colors">
+                            <X className="w-4 h-4" />
                           </button>
-                        )
-                      }
-                      return cells
-                    })()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-slate-700 mt-3 pt-3 flex justify-between font-black">
+                    <span className="text-white">Total</span>
+                    <span className="text-orange-400 text-lg">₹{twItems.reduce((s, i) => s + i.price * i.qty, 0)}</span>
                   </div>
                 </div>
-              )}
-            </div>
+
+                <button
+                  onClick={() => setTwStep(2)}
+                  className="w-full border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 py-3 rounded-2xl text-sm font-semibold transition-colors"
+                >
+                  ← Add More Items
+                </button>
+
+                <Button
+                  disabled={twItems.length === 0 || twSaving}
+                  onClick={saveTakeawayOrder}
+                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-40 font-bold h-14 rounded-2xl text-base"
+                >
+                  {twSaving ? 'Placing Order…' : `Confirm Takeaway — ₹${twItems.reduce((s, i) => s + i.price * i.qty, 0)}`}
+                </Button>
+              </div>
+            )}
+
           </div>
         </div>
       )}
@@ -3541,8 +3500,8 @@ export default function AdminDashboard() {
             <div className="px-5 py-4">
               <p className="text-slate-300 text-sm mb-5">
                 {masterToggleConfirm === 'off'
-                  ? 'Ye sabhi menu items ko customers se turant hide kar dega — jaise restaurant band ho gaya ho.'
-                  : 'Ye sabhi menu items ko wapas available kar dega — chahe pehle kisi item ko manually off kiya tha (jaise out of stock).'}
+                  ? 'This will immediately hide all menu items from customers — as if the restaurant is closed.'
+                  : 'This will make all menu items available again — even items that were manually turned off (e.g. out of stock).'}
               </p>
               <div className="flex gap-2">
                 <button
@@ -3838,6 +3797,118 @@ export default function AdminDashboard() {
         </div>
       )}
 
+    </div>
+  )
+}
+
+function TakeawayCard({ order, onUpdate }: { order: any; onUpdate: (status: string) => void }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const [loading, setLoading] = React.useState(false)
+
+  const STATUS = {
+    new:       { next: 'preparing', nextLabel: 'Start Preparing', icon: '🧾', btnClass: 'bg-sky-600 hover:bg-sky-700' },
+    preparing: { next: 'ready',     nextLabel: 'Mark Ready',      icon: '👨‍🍳', btnClass: 'bg-amber-600 hover:bg-amber-700' },
+    ready:     { next: 'done',      nextLabel: 'Picked Up ✓',     icon: '✅', btnClass: 'bg-green-600 hover:bg-green-700' },
+    done:      { next: '',          nextLabel: '',                 icon: '📦', btnClass: '' },
+    cancelled: { next: '',          nextLabel: '',                 icon: '❌', btnClass: '' },
+  } as const
+  type S = keyof typeof STATUS
+  const cfg = STATUS[order.status as S] ?? STATUS.new
+
+  const formatTime = (t: string) => {
+    if (!t || t === 'ASAP') return 'ASAP'
+    try {
+      const [h, m] = t.split(':')
+      const d = new Date(); d.setHours(+h, +m)
+      return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+    } catch { return t }
+  }
+
+  const advance = async () => {
+    if (!cfg.next) return
+    setLoading(true)
+    await onUpdate(cfg.next)
+    setLoading(false)
+  }
+
+  const cancel = async () => {
+    setLoading(true)
+    await onUpdate('cancelled')
+    setLoading(false)
+  }
+
+  return (
+    <div className={`bg-slate-900 rounded-2xl border overflow-hidden transition-all ${
+      order.status === 'done' ? 'border-slate-700 opacity-70' :
+      order.status === 'ready' ? 'border-green-700/50' : 'border-slate-800'
+    }`}>
+      {/* Card header — always visible */}
+      <div
+        className="flex items-start justify-between gap-2 px-4 py-3.5 cursor-pointer select-none"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-base">{cfg.icon}</span>
+            <p className="font-bold text-white text-sm truncate">{order.customer_name}</p>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-slate-400">
+            {order.phone && <span>{order.phone}</span>}
+            <span className="flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 7v5l3 3"/></svg>
+              {formatTime(order.pickup_time)}
+            </span>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-orange-400 font-black text-base">₹{order.total_amount}</p>
+          <p className="text-[10px] text-slate-600 mt-0.5">{(order.items||[]).reduce((s:number,i:any)=>s+i.qty,0)} items</p>
+        </div>
+      </div>
+
+      {/* Expanded items */}
+      {expanded && (
+        <div className="px-4 pb-3 border-t border-slate-800 pt-3 space-y-1.5">
+          {(order.items || []).map((item: any, i: number) => (
+            <div key={i} className="flex justify-between items-start text-sm">
+              <div className="min-w-0">
+                <span className="text-slate-300">{item.qty}× {item.name}</span>
+                {item.addons && <p className="text-xs text-orange-400">+ {item.addons}</p>}
+              </div>
+              <span className="text-slate-500 shrink-0 ml-2">₹{item.price * item.qty}</span>
+            </div>
+          ))}
+          {order.notes && (
+            <p className="text-xs text-amber-400 italic border-t border-slate-800 pt-2 mt-2">
+              Note: {order.notes}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {(cfg.next || order.status === 'new' || order.status === 'preparing') && (
+        <div className="px-4 pb-4 pt-1 flex gap-2">
+          {cfg.next && (
+            <button
+              onClick={advance}
+              disabled={loading}
+              className={`flex-1 ${cfg.btnClass} text-white font-bold text-xs py-2.5 rounded-xl transition-colors disabled:opacity-50`}
+            >
+              {loading ? '…' : cfg.nextLabel}
+            </button>
+          )}
+          {(order.status === 'new' || order.status === 'preparing') && (
+            <button
+              onClick={cancel}
+              disabled={loading}
+              className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-xs py-2.5 px-3 rounded-xl transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
