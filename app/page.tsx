@@ -56,13 +56,13 @@ export default function LoginPage() {
   };
 
   // Session check loader — same as dashboard
-  if (checking) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-slate-950">
-        <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+if (checking) {
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-slate-950">
+      <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950">
