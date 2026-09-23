@@ -3,8 +3,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { SpeedInsights } from "@vercel/speed-insights/next"
-import { CookieConsent } from "@/components/cookie-consent";
-
+ 
 const inter = Inter({ subsets: ["latin"] });
 
 // ✅ PWA Manifest aur Apple App settings add kiye
@@ -43,7 +42,6 @@ export default function RootLayout({
       <body className={inter.className}>
         <OneSignalInit />
         {children}
-        <CookieConsent />
       </body>
     </html>
   );
