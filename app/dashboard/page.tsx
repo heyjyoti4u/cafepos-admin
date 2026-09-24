@@ -75,10 +75,8 @@ export default function AdminDashboard() {
   const [mobileMoreOpen, setMobileMoreOpen]   = useState(false)
   // ── Takeaway ──────────────────────────────────────────────────────────────
   const [takeawayOrders, setTakeawayOrders]   = useState<any[]>([])
+  const [takeawayHistoryOrders, setTakeawayHistoryOrders] = useState<any[]>([]) // completed ones, for Order History + revenue
   const [showTakeawayForm, setShowTakeawayForm] = useState(false)
-  const [twCustomer, setTwCustomer]           = useState('')
-  const [twPhone, setTwPhone]                 = useState('')
-  const [twPickup, setTwPickup]               = useState('')
   const [twNotes, setTwNotes]                 = useState('')
   const [twItems, setTwItems]                 = useState<{ name: string; price: number; qty: number; addons: string; variantLabel: string }[]>([])
   const [twSaving, setTwSaving]               = useState(false)
@@ -89,7 +87,7 @@ export default function AdminDashboard() {
   const [twPickQty, setTwPickQty]             = useState(1)
   const [twMenuSearch, setTwMenuSearch]       = useState('')
   const [twMenuCategory, setTwMenuCategory]   = useState('All')
-  const [twStep, setTwStep]                   = useState<1|2|3>(1) // 1=details, 2=menu, 3=review
+  const [twStep, setTwStep]                   = useState<1|2>(1) // 1=menu, 2=review
   // ── Staff ─────────────────────────────────────────────────────────────────
   const [staffList, setStaffList]             = useState<any[]>([])
   const [showStaffForm, setShowStaffForm]     = useState(false)
@@ -315,7 +313,7 @@ export default function AdminDashboard() {
 
   // ── Takeaway fetch + save ─────────────────────────────────────────────────
   const resetTakeawayForm = () => {
-    setTwCustomer(''); setTwPhone(''); setTwPickup(''); setTwNotes('')
+    setTwNotes('')
     setTwItems([]); setTwPickingItem(null); setTwPickVariant(null)
     setTwPickAddons(new Set()); setTwPickQty(1)
     setTwMenuSearch(''); setTwMenuCategory('All'); setTwStep(1)
@@ -331,8 +329,18 @@ export default function AdminDashboard() {
     if (data) setTakeawayOrders(data)
   }
 
+  // Completed takeaway orders — feeds Order History + revenue/charts (see takeawayAsHistoryOrders)
+  const fetchTakeawayHistory = async () => {
+    const { data } = await supabase
+      .from('takeaway_orders')
+      .select('*')
+      .eq('status', 'done')
+      .order('created_at', { ascending: false })
+    if (data) setTakeawayHistoryOrders(data)
+  }
+
   const saveTakeawayOrder = async () => {
-    if (!twCustomer.trim() || twItems.length === 0) return
+    if (twItems.length === 0) return
     setTwSaving(true)
     const total = twItems.reduce((s, i) => s + i.price * i.qty, 0)
     // Flatten to a clean array for DB storage
@@ -342,10 +350,16 @@ export default function AdminDashboard() {
       qty: i.qty,
       addons: i.addons || '',
     }))
+    // No name/phone/time asked from staff — takeaway orders move fast.
+    // Auto-label by order time, and auto-estimate pickup ~15 min from now.
+    const now = new Date()
+    const orderLabel = `Takeaway ${now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })}`
+    const est = new Date(now.getTime() + 15 * 60000)
+    const autoPickup = `${String(est.getHours()).padStart(2, '0')}:${String(est.getMinutes()).padStart(2, '0')}`
     await supabase.from('takeaway_orders').insert({
-      customer_name: twCustomer.trim(),
-      phone: twPhone.trim(),
-      pickup_time: twPickup || 'ASAP',
+      customer_name: orderLabel,
+      phone: '',
+      pickup_time: autoPickup,
       notes: twNotes.trim(),
       items: itemsForDb,
       total_amount: total,
@@ -450,6 +464,7 @@ export default function AdminDashboard() {
     audioRef.current.load()
 
     fetchOrders()
+    fetchTakeawayHistory()
 
     const channel = supabase
       .channel('admin-live-orders')
@@ -687,7 +702,28 @@ export default function AdminDashboard() {
   const visibleDeclined = orders.filter(o => o.status === 'declined' && !hiddenDeclined.has(o.id))
   const pendingOrders   = orders.filter(o => o.status === 'pending')
   const preparingOrders = orders.filter(o => o.status === 'preparing')
-  const deliveredOrders = orders.filter(o => o.status === 'delivered')
+  // Completed takeaway orders, reshaped to match a dine-in `orders` row so they can
+  // flow into Order History / revenue / charts through the same `deliveredOrders` list.
+  const takeawayAsHistoryOrders = takeawayHistoryOrders.map((t: any) => ({
+    id: t.id,
+    created_at: t.created_at,
+    customer_name: t.customer_name,
+    table_number: null,
+    order_type: 'takeaway',
+    total_amount: t.total_amount,
+    payment_status: 'paid', // takeaway is settled at pickup
+    status: 'delivered',
+    customer_notes: t.notes || '',
+    order_items: (t.items || []).map((i: any) => ({
+      item_name: i.name,
+      item_price: i.price,
+      quantity: i.qty,
+      category: 'Takeaway',
+      add_ons: i.addons ? i.addons.split(',').map((n: string) => ({ name: n.trim() })).filter((a: any) => a.name) : [],
+    })),
+  }))
+  const deliveredOrders = [...orders.filter(o => o.status === 'delivered'), ...takeawayAsHistoryOrders]
+    .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
   const kitchenActive   = orders.filter(o => ['pending', 'preparing'].includes(o.status))
   const unpaidOrders    = orders.filter(o => o.status === 'delivered' && o.payment_status !== 'paid')
 
@@ -1893,7 +1929,13 @@ export default function AdminDashboard() {
                             </td>
                             <td className="px-4 md:px-6 py-4">
                               <p className="text-white font-medium capitalize">{order.customer_name}</p>
-                              <p className="text-xs text-slate-500">Table {order.table_number}</p>
+                              {order.order_type === 'takeaway' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 mt-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                                  <Package className="w-3 h-3" /> Takeaway
+                                </span>
+                              ) : (
+                                <p className="text-xs text-slate-500">Table {order.table_number}</p>
+                              )}
                             </td>
                             <td className="px-4 md:px-6 py-4 font-bold text-emerald-400">₹{order.total_amount}</td>
                             <td className="px-4 md:px-6 py-4 text-right">
@@ -2593,93 +2635,17 @@ export default function AdminDashboard() {
                 </button>
               </div>
             ) : (
-              <>
-                {/* ── Mobile: vertical list ── Desktop: Kanban columns ── */}
-
-                {/* Desktop Kanban */}
-                <div className="hidden md:grid grid-cols-4 gap-4">
-                  {(['new','preparing','ready','done'] as const).map(colStatus => {
-                    const colConfig = {
-                      new:       { label: 'Received',  color: 'text-sky-400',   bg: 'bg-sky-500/10',   border: 'border-sky-500/20',   dot: 'bg-sky-400'   },
-                      preparing: { label: 'Preparing', color: 'text-amber-400', bg: 'bg-amber-500/10', border: 'border-amber-500/20', dot: 'bg-amber-400' },
-                      ready:     { label: 'Ready',     color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', dot: 'bg-green-400' },
-                      done:      { label: 'Picked Up', color: 'text-slate-400', bg: 'bg-slate-500/10', border: 'border-slate-500/20', dot: 'bg-slate-400' },
-                    }
-                    const col = colConfig[colStatus]
-                    const colOrders = takeawayOrders.filter(o => o.status === colStatus)
-                    return (
-                      <div key={colStatus} className="flex flex-col gap-3">
-                        {/* Column header */}
-                        <div className={`flex items-center justify-between px-3 py-2 rounded-xl ${col.bg} border ${col.border}`}>
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${col.dot} ${colStatus === 'preparing' ? 'animate-pulse' : ''}`} />
-                            <span className={`text-xs font-bold ${col.color}`}>{col.label}</span>
-                          </div>
-                          <span className={`text-xs font-black ${col.color}`}>{colOrders.length}</span>
-                        </div>
-
-                        {/* Cards */}
-                        <div className="flex flex-col gap-3 min-h-[120px]">
-                          {colOrders.length === 0 && (
-                            <div className="border-2 border-dashed border-slate-800 rounded-2xl h-24 flex items-center justify-center">
-                              <p className="text-xs text-slate-700">Empty</p>
-                            </div>
-                          )}
-                          {colOrders.map(order => (
-                            <TakeawayCard key={order.id} order={order} onUpdate={async (nextStatus: string) => {
-                              await supabase.from('takeaway_orders').update({ status: nextStatus }).eq('id', order.id)
-                              fetchTakeawayOrders()
-                            }} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-
-                {/* Mobile: vertical list grouped by status */}
-                <div className="md:hidden space-y-6">
-                  {(['new','preparing','ready','done'] as const).map(colStatus => {
-                    const colOrders = takeawayOrders.filter(o => o.status === colStatus)
-                    if (colOrders.length === 0) return null
-                    const labels: Record<string,string> = { new: 'Received', preparing: 'Preparing', ready: 'Ready to Pick Up', done: 'Picked Up' }
-                    const colors: Record<string,string> = { new: 'text-sky-400', preparing: 'text-amber-400 animate-pulse', ready: 'text-green-400', done: 'text-slate-500' }
-                    return (
-                      <div key={colStatus}>
-                        <p className={`text-xs font-bold uppercase tracking-widest mb-2 ${colors[colStatus]}`}>
-                          {labels[colStatus]} ({colOrders.length})
-                        </p>
-                        <div className="space-y-3">
-                          {colOrders.map(order => (
-                            <TakeawayCard key={order.id} order={order} onUpdate={async (nextStatus: string) => {
-                              await supabase.from('takeaway_orders').update({ status: nextStatus }).eq('id', order.id)
-                              fetchTakeawayOrders()
-                            }} />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
-                  {/* Show cancelled separately at bottom */}
-                  {takeawayOrders.filter(o => o.status === 'cancelled').length > 0 && (
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-widest mb-2 text-red-500">
-                        Cancelled ({takeawayOrders.filter(o => o.status === 'cancelled').length})
-                      </p>
-                      <div className="space-y-2">
-                        {takeawayOrders.filter(o => o.status === 'cancelled').map(order => (
-                          <div key={order.id} className="bg-slate-900 border border-red-900/30 rounded-2xl px-4 py-3 opacity-60">
-                            <div className="flex justify-between items-center">
-                              <p className="text-sm font-semibold text-slate-400">{order.customer_name}</p>
-                              <p className="text-sm text-slate-500">₹{order.total_amount}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
+              // Simple flat list — order placed → tap Picked Up when the customer collects it.
+              // (Cancelled/done orders drop out immediately — fetchTakeawayOrders only loads active ones.)
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {takeawayOrders.map(order => (
+                  <TakeawayCard key={order.id} order={order} onUpdate={async (nextStatus: string) => {
+                    await supabase.from('takeaway_orders').update({ status: nextStatus }).eq('id', order.id)
+                    fetchTakeawayOrders()
+                    if (nextStatus === 'done') fetchTakeawayHistory()
+                  }} />
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -2780,15 +2746,15 @@ export default function AdminDashboard() {
             <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
               <div className="flex items-center gap-3">
                 {twStep > 1 && !twPickingItem && (
-                  <button onClick={() => setTwStep(s => (s - 1) as 1|2|3)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors">
+                  <button onClick={() => setTwStep(s => (s - 1) as 1|2)} className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors">
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7"/></svg>
                   </button>
                 )}
                 <div>
                   <h2 className="text-base font-bold text-white">
-                    {twStep === 1 ? 'Customer Details' : twStep === 2 ? 'Add Items' : 'Review Order'}
+                    {twStep === 1 ? 'Add Items' : 'Review Order'}
                   </h2>
-                  <p className="text-xs text-slate-500">Step {twStep} of 3</p>
+                  <p className="text-xs text-slate-500">Step {twStep} of 2</p>
                 </div>
               </div>
               <button onClick={resetTakeawayForm} className="p-2 bg-slate-800 hover:bg-slate-700 rounded-full text-slate-400 transition-colors">
@@ -2798,104 +2764,13 @@ export default function AdminDashboard() {
 
             {/* Step indicator */}
             <div className="flex gap-1.5 px-5 pt-3 pb-1 shrink-0">
-              {[1,2,3].map(s => (
+              {[1,2].map(s => (
                 <div key={s} className={`h-1 flex-1 rounded-full transition-all duration-300 ${twStep >= s ? 'bg-orange-500' : 'bg-slate-700'}`} />
               ))}
             </div>
 
-            {/* ── STEP 1: Customer details + time ── */}
+            {/* ── STEP 1: Menu picker ── */}
             {twStep === 1 && (
-              <div className="flex-1 overflow-y-auto px-5 pt-4 pb-5 space-y-5">
-                {/* Name + Phone */}
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Customer Name *</label>
-                    <input
-                      value={twCustomer}
-                      onChange={e => setTwCustomer(e.target.value)}
-                      placeholder="Enter name"
-                      autoFocus
-                      className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Phone Number</label>
-                    <input
-                      value={twPhone}
-                      onChange={e => setTwPhone(e.target.value)}
-                      placeholder="+91 98765 43210"
-                      type="tel"
-                      className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors"
-                    />
-                  </div>
-                </div>
-
-                {/* Pickup Time — clock-style native time picker */}
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Pickup Time</label>
-                  <div className="relative">
-                    {/* Clock icon */}
-                    <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-orange-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                      <circle cx="12" cy="12" r="9"/><path strokeLinecap="round" d="M12 7v5l3 3"/>
-                    </svg>
-                    <input
-                      type="time"
-                      value={twPickup}
-                      onChange={e => setTwPickup(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-2xl pl-12 pr-4 py-3.5 text-base font-bold text-white focus:outline-none focus:border-orange-500 transition-colors appearance-none [color-scheme:dark]"
-                    />
-                    {/* Quick time chips */}
-                  </div>
-                  <div className="flex gap-2 mt-2 flex-wrap">
-                    {(() => {
-                      const now = new Date()
-                      return [15, 30, 45, 60].map(mins => {
-                        const t = new Date(now.getTime() + mins * 60000)
-                        const hh = String(t.getHours()).padStart(2,'0')
-                        const mm = String(t.getMinutes()).padStart(2,'0')
-                        const display = t.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-                        return (
-                          <button
-                            key={mins}
-                            onClick={() => setTwPickup(`${hh}:${mm}`)}
-                            className={`text-xs px-3 py-1.5 rounded-full font-semibold transition-colors border ${
-                              twPickup === `${hh}:${mm}`
-                                ? 'bg-orange-600 border-orange-500 text-white'
-                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'
-                            }`}
-                          >
-                            +{mins}m · {display}
-                          </button>
-                        )
-                      })
-                    })()}
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Special Instructions</label>
-                  <textarea
-                    value={twNotes}
-                    onChange={e => setTwNotes(e.target.value)}
-                    placeholder="e.g. Less spicy, extra sauce…"
-                    rows={2}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors resize-none"
-                  />
-                </div>
-
-                <button
-                  disabled={!twCustomer.trim()}
-                  onClick={() => setTwStep(2)}
-                  className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold py-3.5 rounded-2xl text-sm transition-colors"
-                >
-                  Next — Choose Items →
-                </button>
-              </div>
-            )}
-
-            {/* ── STEP 2: Menu picker ── */}
-            {twStep === 2 && (
               <div className="flex-1 flex flex-col overflow-hidden">
 
                 {/* Item configurator — fullscreen within modal */}
@@ -3082,7 +2957,7 @@ export default function AdminDashboard() {
                     <div className="px-4 pb-4 pt-2 border-t border-slate-800 shrink-0">
                       <button
                         disabled={twItems.length === 0}
-                        onClick={() => setTwStep(3)}
+                        onClick={() => setTwStep(2)}
                         className="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-40 text-white font-bold py-3.5 rounded-2xl text-sm transition-colors flex items-center justify-between px-5"
                       >
                         <span>Review Order →</span>
@@ -3098,40 +2973,9 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ── STEP 3: Review + confirm ── */}
-            {twStep === 3 && (
+            {/* ── STEP 2: Review + confirm ── */}
+            {twStep === 2 && (
               <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-                {/* Customer summary */}
-                <div className="bg-slate-800 rounded-2xl p-4 space-y-2">
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Customer</p>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Name</span>
-                    <span className="text-white font-semibold">{twCustomer}</span>
-                  </div>
-                  {twPhone && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-slate-400">Phone</span>
-                      <span className="text-white">{twPhone}</span>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-slate-400">Pickup</span>
-                    <span className="text-white font-semibold">
-                      {twPickup ? (() => {
-                        const [h, m] = twPickup.split(':')
-                        const d = new Date(); d.setHours(+h, +m)
-                        return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-                      })() : 'ASAP'}
-                    </span>
-                  </div>
-                  {twNotes && (
-                    <div className="flex items-start justify-between text-sm gap-4">
-                      <span className="text-slate-400 shrink-0">Note</span>
-                      <span className="text-amber-400 text-right">{twNotes}</span>
-                    </div>
-                  )}
-                </div>
-
                 {/* Items */}
                 <div className="bg-slate-800 rounded-2xl p-4">
                   <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Items</p>
@@ -3160,8 +3004,17 @@ export default function AdminDashboard() {
                   </div>
                 </div>
 
+                {/* Optional note for the kitchen — not a required step */}
+                <textarea
+                  value={twNotes}
+                  onChange={e => setTwNotes(e.target.value)}
+                  placeholder="Add a note for kitchen (optional) — e.g. Less spicy"
+                  rows={2}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition-colors resize-none"
+                />
+
                 <button
-                  onClick={() => setTwStep(2)}
+                  onClick={() => setTwStep(1)}
                   className="w-full border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 py-3 rounded-2xl text-sm font-semibold transition-colors"
                 >
                   ← Add More Items
@@ -3811,11 +3664,9 @@ function TakeawayCard({ order, onUpdate }: { order: any; onUpdate: (status: stri
   const [loading, setLoading] = React.useState(false)
 
   const STATUS = {
-    new:       { next: 'preparing', nextLabel: 'Start Preparing', icon: '🧾', btnClass: 'bg-sky-600 hover:bg-sky-700' },
-    preparing: { next: 'ready',     nextLabel: 'Mark Ready',      icon: '👨‍🍳', btnClass: 'bg-amber-600 hover:bg-amber-700' },
-    ready:     { next: 'done',      nextLabel: 'Picked Up ✓',     icon: '✅', btnClass: 'bg-green-600 hover:bg-green-700' },
-    done:      { next: '',          nextLabel: '',                 icon: '📦', btnClass: '' },
-    cancelled: { next: '',          nextLabel: '',                 icon: '❌', btnClass: '' },
+    new:       { next: 'done', nextLabel: 'Picked Up ✓', icon: '🧾', btnClass: 'bg-green-600 hover:bg-green-700' },
+    done:      { next: '',     nextLabel: '',             icon: '📦', btnClass: '' },
+    cancelled: { next: '',     nextLabel: '',             icon: '❌', btnClass: '' },
   } as const
   type S = keyof typeof STATUS
   const cfg = STATUS[order.status as S] ?? STATUS.new
@@ -3844,8 +3695,7 @@ function TakeawayCard({ order, onUpdate }: { order: any; onUpdate: (status: stri
 
   return (
     <div className={`bg-slate-900 rounded-2xl border overflow-hidden transition-all ${
-      order.status === 'done' ? 'border-slate-700 opacity-70' :
-      order.status === 'ready' ? 'border-green-700/50' : 'border-slate-800'
+      order.status === 'done' ? 'border-slate-700 opacity-70' : 'border-slate-800'
     }`}>
       {/* Card header — always visible */}
       <div
@@ -3892,26 +3742,22 @@ function TakeawayCard({ order, onUpdate }: { order: any; onUpdate: (status: stri
       )}
 
       {/* Action buttons */}
-      {(cfg.next || order.status === 'new' || order.status === 'preparing') && (
+      {order.status === 'new' && (
         <div className="px-4 pb-4 pt-1 flex gap-2">
-          {cfg.next && (
-            <button
-              onClick={advance}
-              disabled={loading}
-              className={`flex-1 ${cfg.btnClass} text-white font-bold text-xs py-2.5 rounded-xl transition-colors disabled:opacity-50`}
-            >
-              {loading ? '…' : cfg.nextLabel}
-            </button>
-          )}
-          {(order.status === 'new' || order.status === 'preparing') && (
-            <button
-              onClick={cancel}
-              disabled={loading}
-              className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-xs py-2.5 px-3 rounded-xl transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-          )}
+          <button
+            onClick={advance}
+            disabled={loading}
+            className={`flex-1 ${cfg.btnClass} text-white font-bold text-xs py-2.5 rounded-xl transition-colors disabled:opacity-50`}
+          >
+            {loading ? '…' : cfg.nextLabel}
+          </button>
+          <button
+            onClick={cancel}
+            disabled={loading}
+            className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 font-bold text-xs py-2.5 px-3 rounded-xl transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
         </div>
       )}
     </div>
